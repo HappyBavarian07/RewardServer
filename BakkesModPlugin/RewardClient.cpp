@@ -46,7 +46,7 @@ namespace {
 
         return {
             {"cmd", cmd}, {"step", snap.step}, {"force_all", snap.forceAll}, {"debug", snap.debug},
-            {"tick_skip", snap.tickSkip}, {"focus", snap.focus},
+            {"tick_skip", std::string(cmd) == "capture" ? snap.captureTicks : snap.tickSkip}, {"focus", snap.focus},
             {"cars", cars},
             {
                 "ball", {
@@ -132,17 +132,19 @@ void RewardClient::RequestLoad(const std::string &config) {
     needLoad_ = true;
 }
 
-void RewardClient::RequestReset() {
+void RewardClient::RequestReset(bool clearBuffer) {
     std::lock_guard<std::mutex> l(cfgMut_);
     needReset_ = true;
+    pendingResetClear_ = pendingResetClear_ || clearBuffer;
 }
 
-void RewardClient::RequestSaveClip(const std::string &name) { {
+void RewardClient::RequestSaveClip(const std::string &name, ClipRequest request) { {
         std::lock_guard<std::mutex> l(clipMut_);
         clip_.pending = true;
     }
     std::lock_guard<std::mutex> l(cfgMut_);
     pendingClipName_ = name;
+    pendingClipRequest_ = std::move(request);
     needSaveClip_ = true;
 }
 
@@ -215,11 +217,12 @@ void RewardClient::RequestReloadTasks(const std::string &path) {
     needReloadTasks_ = true;
 }
 
-void RewardClient::RequestSaveTaskClip() { {
+void RewardClient::RequestSaveTaskClip(ClipRequest request) { {
         std::lock_guard<std::mutex> l(clipMut_);
         clip_.pending = true;
     }
     std::lock_guard<std::mutex> l(cfgMut_);
+    pendingTaskClipRequest_ = std::move(request);
     needSaveTaskClip_ = true;
 }
 
@@ -320,9 +323,10 @@ bool RewardClient::DoReloadTasks(const std::string &path) {
     return Rpc(json{{"cmd", "reload_tasks"}, {"path", path}}.dump(), resp) && ApplyTaskReply(resp, true);
 }
 
-bool RewardClient::DoSaveTaskClip() {
+bool RewardClient::DoSaveTaskClip(const ClipRequest &request) {
     std::string resp;
-    if (!Rpc(json{{"cmd", "save_task_clip"}}.dump(), resp)) return false;
+    if (!Rpc(json{{"cmd", "save_task_clip"}, {"only_focus", request.onlyFocus}, {"source", request.source}}.dump(), resp))
+        return false;
     try {
         const json j = json::parse(resp);
         {
@@ -339,9 +343,11 @@ bool RewardClient::DoSaveTaskClip() {
     }
 }
 
-bool RewardClient::DoSaveClip(const std::string &name) {
+bool RewardClient::DoSaveClip(const std::string &name, const ClipRequest &request) {
     std::string resp;
-    if (!Rpc(json{{"cmd", "save_clip"}, {"name", name}}.dump(), resp)) return false;
+    if (!Rpc(json{{"cmd", "save_clip"}, {"name", name}, {"only_focus", request.onlyFocus}, {"source", request.source}}.dump(),
+             resp))
+        return false;
     try {
         json j = json::parse(resp);
         std::lock_guard<std::mutex> l(clipMut_);
@@ -590,6 +596,8 @@ void RewardClient::WorkerLoop() {
         std::string cfg;
         bool doLoad = false;
         bool doReset = false;
+        bool resetClear = false;
+        ClipRequest clipRequest;
         bool doSaveClip = false;
         bool doListClips = false;
         bool doClipFilesystemCommand = false;
@@ -617,13 +625,17 @@ void RewardClient::WorkerLoop() {
                 needLoad_ = false;
             } else if (needReset_) {
                 doReset = true;
+                resetClear = pendingResetClear_;
+                pendingResetClear_ = false;
                 needReset_ = false;
             } else if (needSaveClip_) {
                 doSaveClip = true;
                 clipName = pendingClipName_;
+                clipRequest = pendingClipRequest_;
                 needSaveClip_ = false;
             } else if (needSaveTaskClip_) {
                 doSaveTaskClip = true;
+                clipRequest = pendingTaskClipRequest_;
                 needSaveTaskClip_ = false;
             } else if (needGetTasks_) {
                 doGetTasks = true;
@@ -668,11 +680,11 @@ void RewardClient::WorkerLoop() {
         }
         if (doReset) {
             std::string resp;
-            if (!Rpc(json{{"cmd", "reset"}}.dump(), resp)) { Disconnect(); }
+            if (!Rpc(json{{"cmd", "reset"}, {"clear_buffer", resetClear}}.dump(), resp)) { Disconnect(); }
             continue;
         }
         if (doSaveClip) {
-            if (!DoSaveClip(clipName)) Disconnect();
+            if (!DoSaveClip(clipName, clipRequest)) Disconnect();
             else {
                 std::lock_guard<std::mutex> l(cfgMut_);
                 needListClips_ = true;
@@ -680,7 +692,7 @@ void RewardClient::WorkerLoop() {
             continue;
         }
         if (doSaveTaskClip) {
-            if (!DoSaveTaskClip()) Disconnect();
+            if (!DoSaveTaskClip(clipRequest)) Disconnect();
             else {
                 std::lock_guard<std::mutex> l(cfgMut_);
                 needListClips_ = true;

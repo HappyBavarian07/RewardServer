@@ -383,14 +383,16 @@ bool RewardEval::Evaluate(const json& req, RewardTerms& out) {
 bool RewardEval::Capture(const json& req) {
     RLGC::GameState gs;
     if (!BuildGameState(req, gs)) return false;
+    const int span = std::max(1, req.value("tick_skip", 1));
     gs.prev = nullptr;
     gs.userInfo = nullptr;
-    gs.deltaTime = 1.0f / 120.0f;
-    gs.lastTickCount = ++captureTickCounter_;
+    gs.deltaTime = static_cast<float>(span) / 120.0f;
+    captureTickCounter_ += static_cast<uint64_t>(span);
+    gs.lastTickCount = captureTickCounter_;
     if (!captureMirror_) captureMirror_ = std::make_unique<RewardEval>();
     captureMirror_->SetMirrorEnabled(mirrorEnabled_);
     captureMirror_->ReconstructState(gs,
-        haveCapturePrev_ && !captureBuffer_.empty() ? &captureBuffer_.back() : nullptr, 1);
+        haveCapturePrev_ && !captureBuffer_.empty() ? &captureBuffer_.back() : nullptr, span);
     captureBuffer_.push_back(std::move(gs));
     haveCapturePrev_ = true;
     const uint64_t windowTicks = (uint64_t)(clipWindowSeconds_ * 120.0f);
@@ -443,7 +445,15 @@ bool RewardEval::EvaluateState(RLGC::GameState& gs, int tickSkip, int focus, boo
     return true;
 }
 
-bool RewardEval::SaveClip(const std::string& name, std::string& outPath, std::string& err, const std::string& subfolder) {
+void RewardEval::ClearBuffers() {
+    clipBuffer_.clear();
+    captureBuffer_.clear();
+    haveCapturePrev_ = false;
+    havePrev_ = false;
+}
+
+bool RewardEval::SaveClip(const std::string& name, std::string& outPath, std::string& err, const std::string& subfolder,
+                          const ClipOptions& clipOptions) {
     const auto& sourceBuffer = captureBuffer_.empty() ? clipBuffer_ : captureBuffer_;
     if (sourceBuffer.empty()) {
         err = "clip buffer is empty";
@@ -470,30 +480,36 @@ bool RewardEval::SaveClip(const std::string& name, std::string& outPath, std::st
     }
     outPath = folder + "/" + base + ".rlpr";
 
+    std::vector<RLGC::GameState> reduced;
     std::vector<const RLGC::GameState*> ticks;
     ticks.reserve(sourceBuffer.size());
-    for (const auto& s : sourceBuffer) ticks.push_back(&s);
+    if (clipOptions.onlyFocus) {
+        reduced.reserve(sourceBuffer.size());
+        for (const auto& s : sourceBuffer) {
+            reduced.push_back(s);
+            if (reduced.back().players.size() > 1) reduced.back().players.resize(1);
+        }
+        for (const auto& s : reduced) ticks.push_back(&s);
+    } else {
+        for (const auto& s : sourceBuffer) ticks.push_back(&s);
+    }
 
     RLGC::RLPRExportOptions options;
-    if (!captureBuffer_.empty()) {
-        options.sourceTickRateHz = 120;
-        options.frameIntervalTicks = 1;
-    } else {
-        options.sourceTickRateHz = 120;
-        options.frameIntervalTicks = std::max(1, static_cast<int>(std::lround(sourceBuffer.back().deltaTime * 120.0f)));
-    }
+    options.sourceTickRateHz = 120;
+    options.frameIntervalTicks = std::max(1, static_cast<int>(std::lround(sourceBuffer.back().deltaTime * 120.0f)));
     if (!RLGC::ExportClipToRLPR(outPath, ticks,
                                 RLGC::rlpr::Vec3{0, 0, 0},
                                 RLGC::rlpr::Vec3{0, 0, 0},
                                 options)) {
-        err = "RLPR export failed (1v1 only, and the clip must be non-empty)";
+        err = "RLPR export failed (at most 6 cars, and the clip must be non-empty)";
         return false;
     }
     std::ofstream provenance(outPath + ".json");
     if (!provenance) { err = "RLPR saved, but cannot write contact provenance sidecar"; return false; }
     provenance << json{{"contact_source", mirrorEnabled_ ? "preceding_interval_reconstruction" : "plugin_proximity_heuristic"},
         {"contact_is_native_rl_truth", false}, {"frame_interval_ticks", options.frameIntervalTicks},
-        {"kinematics_source", "observed"}}.dump(2);
+        {"kinematics_source", "observed"}, {"source", clipOptions.source}, {"only_focus_car", clipOptions.onlyFocus},
+        {"cars", ticks.back()->players.size()}}.dump(2);
     if (!provenance) { err = "RLPR saved, but writing contact provenance sidecar failed"; return false; }
     return true;
 }
@@ -754,7 +770,8 @@ bool RewardEval::ResetTask(int index) {
     return false;
 }
 
-bool RewardEval::SaveTaskClip(std::string& outPath, std::string& err, const std::string& overrideSubfolder) {
+bool RewardEval::SaveTaskClip(std::string& outPath, std::string& err, const std::string& overrideSubfolder,
+                              const ClipOptions& clipOptions) {
     if (tasks_.empty()) {
         err = "no shot tasks loaded on server (pass --tasks <path> on server boot)";
         return false;
@@ -781,7 +798,7 @@ bool RewardEval::SaveTaskClip(std::string& outPath, std::string& err, const std:
     while (std::filesystem::exists(folder / ("attempt_" + std::to_string(number) + ".rlpr")) ||
            std::filesystem::exists(folder / ("attempt_" + std::to_string(number) + "_undone.rlpr"))) ++number;
 
-    if (!SaveClip("attempt_" + std::to_string(number), outPath, err, subfolder)) {
+    if (!SaveClip("attempt_" + std::to_string(number), outPath, err, subfolder, clipOptions)) {
         return false;
     }
     cur.completedAttempts++;

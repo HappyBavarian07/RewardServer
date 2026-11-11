@@ -46,7 +46,15 @@ public:
     void SetClipWindowSeconds(float s) { clipWindowSeconds_ = std::max(1.0f, s); }
     float ClipWindowSeconds() const { return clipWindowSeconds_; }
 
-    bool SaveClip(const std::string& name, std::string& outPath, std::string& err, const std::string& subfolder = "generic");
+    struct ClipOptions {
+        bool onlyFocus = false;
+        std::string source = "live";
+    };
+
+    bool SaveClip(const std::string& name, std::string& outPath, std::string& err, const std::string& subfolder = "generic",
+                  const ClipOptions& options = {});
+
+    void ClearBuffers();
 
     std::vector<std::string> ListClips() const;
 
@@ -79,7 +87,8 @@ public:
     const std::string& TaskMessage() const { return taskMessage_; }
     nlohmann::json LastAttemptJson() const;
     bool ResetTask(int index);
-    bool SaveTaskClip(std::string& outPath, std::string& err, const std::string& overrideSubfolder = "");
+    bool SaveTaskClip(std::string& outPath, std::string& err, const std::string& overrideSubfolder = "",
+                      const ClipOptions& options = {});
     int ActiveTaskIndex() const { return activeTaskIndex_; }
 
 private:

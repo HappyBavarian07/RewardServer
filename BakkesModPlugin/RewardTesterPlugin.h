@@ -4,6 +4,8 @@
 #include "bakkesmod/plugin/pluginwindow.h"
 #include "bakkesmod/plugin/pluginsettingswindow.h"
 
+#include <deque>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <memory>
@@ -81,6 +83,71 @@ private:
     void SavePreferences();
 
     void HandleReplayKeys();
+
+    void SubmitSnapshot(ServerWrapper server, CarWrapper subject, int tickAdvance, bool fromReplay);
+
+    void SampleReplay();
+
+    void RecordTermHistory(const RewardResult &res);
+
+    void CheckAlerts(const RewardResult &res);
+
+    void ApplyKeybinds();
+
+    void AutoAdvanceTask();
+
+    void DrawHeader();
+
+    void DrawLiveTab();
+
+    void DrawShotsTab();
+
+    void DrawClipsTab();
+
+    void DrawWatchTab();
+
+    void DrawSettingsTab();
+
+    void DrawReplayOverlay();
+
+    struct WatchInfo {
+        bool inReplay = false;
+        int frame = -1;
+        int fps = 0;
+        int lastSentFrame = -1;
+        int cars = 0;
+        int followedIndex = -1;
+        std::string followedName;
+        uint64_t samples = 0;
+    };
+
+    struct TermAlert {
+        std::string term;
+        bool above = true;
+        float value = 1.0f;
+        double lastFired = 0.0;
+    };
+
+    WatchInfo watch;
+    bool watchEvaluate = true;
+    bool clipOnlyFocus = false;
+    bool autoMarkGoals = false;
+    bool autoAdvance = false;
+    int lastAdvancedKey = -1;
+    double lastGoalTime = -1e9;
+    double lastTaskSaveTime = -1e9;
+    float gameSpeed = 1.0f;
+    std::vector<TermAlert> alerts;
+    std::mutex historyMut;
+    std::vector<std::deque<float>> termHistory;
+    int historyCounter = 0;
+    char clipSearchBuf[128] = {};
+    int clipFilter = 0;
+    char termFilterBuf[64] = {};
+    bool termActiveOnly = false;
+    int alertTermIndex = 0;
+    int alertOp = 0;
+    float alertValue = 1.0f;
 
     bool replayActive = false;
     std::string activeReplayPath;

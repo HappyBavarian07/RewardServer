@@ -28,6 +28,7 @@ link_directories("${BAKKESMOD_SDK_DIR}/lib")
 
 add_library(RewardTesterPlugin SHARED
     RewardTesterPlugin.cpp
+    RewardTesterOverlay.cpp
     RewardTesterPlugin.h
     RewardClient.cpp
     RewardClient.h

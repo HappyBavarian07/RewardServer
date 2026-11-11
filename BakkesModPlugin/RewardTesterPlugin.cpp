@@ -16,6 +16,10 @@
 
 BAKKESMOD_PLUGIN(RewardTesterPlugin, "Reward Tester & State Inspector", "2.0", PERMISSION_ALL)
 
+static double NowSeconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 static void RotatorToRotArray(Rotator rot, float *outMat) {
     float pitch = (float) rot.Pitch * (3.14159265f / 32768.0f);
     float yaw = (float) rot.Yaw * (3.14159265f / 32768.0f);
@@ -81,6 +85,7 @@ void RewardTesterPlugin::HandleReplayKeys() {
 void RewardTesterPlugin::onLoad() {
     cvarManager->log("RewardTesterPlugin loaded");
     gameWrapper->SetTimeout([this](GameWrapper *) { PollCommandFile(); }, 2.0f);
+    gameWrapper->SetTimeout([this](GameWrapper *) { SampleReplay(); }, 1.0f);
 
     LoadPreferences();
     client_ = std::make_unique<RewardClient>();
@@ -99,7 +104,10 @@ void RewardTesterPlugin::onLoad() {
     }, "Save the last seconds of play as a .rlpr clip", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_save_task_clip", [this](std::vector<std::string> args) {
-        if (client_) client_->RequestSaveTaskClip();
+        if (!client_) return;
+        client_->RequestSaveTaskClip({clipOnlyFocus, watch.inReplay ? "replay" : "live"});
+        lastTaskSaveTime = NowSeconds();
+        if (autoMarkGoals && NowSeconds() - lastGoalTime < 20.0) client_->RequestLogTaskAttempt(true);
     }, "Save the rolling window as the next attempt of the active shot task", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_mark_scored", [this](std::vector<std::string> args) {
@@ -198,8 +206,12 @@ void RewardTesterPlugin::onLoad() {
 
     gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.OnScoreUpdated",
                            [this](std::string eventName) {
+                               lastGoalTime = NowSeconds();
+                               if (autoMarkGoals && client_ && NowSeconds() - lastTaskSaveTime < 10.0 &&
+                                   client_->LastAttempt().outcome == "unmarked")
+                                   client_->RequestLogTaskAttempt(true);
                                SendRewardReset();
-                               cvarManager->log("[RewardTester] Goal scored — reward state reset sent.");
+                               cvarManager->log("[RewardTester] Goal scored, reward state reset sent.");
                            });
 
     gameWrapper->HookEvent("Function TAGame.GameEvent_TA.PlayerResetTraining",
@@ -238,7 +250,7 @@ void RewardTesterPlugin::SendRewardReset() {
 
 void RewardTesterPlugin::SaveClip(const std::string &name) {
     if (!client_) return;
-    client_->RequestSaveClip(name);
+    client_->RequestSaveClip(name, {clipOnlyFocus, watch.inReplay ? "replay" : "live"});
     cvarManager->log("Saving clip (.rlpr) from the server's rolling buffer...");
 }
 
@@ -542,6 +554,20 @@ void RewardTesterPlugin::ProbeApplyInput(CarWrapper car, ServerWrapper server, C
     *input = probeScript[static_cast<size_t>(probeTick++)];
 }
 
+void RewardTesterPlugin::AutoAdvanceTask() {
+    if (!autoAdvance || !client_) return;
+    const LastAttemptInfo last = client_->LastAttempt();
+    if (last.number <= 0 || last.outcome == "unmarked" || last.outcome == "none") return;
+    const auto tasks = client_->LatestTasks();
+    const int active = client_->ActiveTaskIndex();
+    if (active < 0 || active >= (int) tasks.size() || tasks.size() < 2) return;
+    const int key = active * 1000 + last.number;
+    if (key == lastAdvancedKey) return;
+    if (tasks[active].completedAttempts < tasks[active].targetAttempts) return;
+    lastAdvancedKey = key;
+    client_->RequestSetActiveTask((active + 1) % (int) tasks.size());
+}
+
 void RewardTesterPlugin::PollCommandFile() {
     if (pluginUnloading) return;
     if (client_) {
@@ -550,6 +576,7 @@ void RewardTesterPlugin::PollCommandFile() {
             lastTaskNoticeSeq = notice.seq;
             gameWrapper->Toast("Reward Tester", notice.text, "default", 3.0f, ToastType_Info);
         }
+        AutoAdvanceTask();
     }
     const char *appdata = std::getenv("APPDATA");
     if (appdata) {
@@ -595,15 +622,20 @@ void RewardTesterPlugin::OnPhysicsTick(ServerWrapper server, void *params) {
     physicsTickCount++;
     if (!client_) return;
 
+    if (watch.inReplay) return;
+
     CarWrapper localCar = gameWrapper->GetLocalCar();
     ArrayWrapper<CarWrapper> carsArray = server.GetCars();
-    int carCount = carsArray.Count();
+    if ((!localCar || localCar.IsNull()) && carsArray.Count() > 0) localCar = carsArray.Get(0);
+    if (!localCar || localCar.IsNull()) return;
+    SubmitSnapshot(server, localCar, 1, false);
+}
 
-    if ((!localCar || localCar.IsNull()) && carCount > 0) {
-        localCar = carsArray.Get(0);
-    }
+void RewardTesterPlugin::SubmitSnapshot(ServerWrapper server, CarWrapper localCar, int tickAdvance, bool fromReplay) {
+    ArrayWrapper<CarWrapper> carsArray = server.GetCars();
+    const int carCount = carsArray.Count();
     BallWrapper ball = server.GetBall();
-    if (!localCar || localCar.IsNull() || !ball || ball.IsNull()) return;
+    if (!ball || ball.IsNull()) return;
 
     std::vector<CarWrapper> orderedCars;
     orderedCars.push_back(localCar);
@@ -690,7 +722,8 @@ void RewardTesterPlugin::OnPhysicsTick(ServerWrapper server, void *params) {
         const bool isBot = pri && !pri.IsNull() && pri.GetbBot();
         const auto stashed = lastAppliedInput.find(car.memory_address);
         const bool exactInput = isBot || probeActive;
-        ControllerInput ci = (exactInput && stashed != lastAppliedInput.end()) ? stashed->second : car.GetInput();
+        ControllerInput ci{};
+        if (!fromReplay) ci = (exactInput && stashed != lastAppliedInput.end()) ? stashed->second : car.GetInput();
         const bool shape = !exactInput;
         c.act[0] = ci.Throttle;
         c.act[1] = shape ? ShapeStick(ci.Steer, inputSteerSensitivity) : ci.Steer;
@@ -802,17 +835,24 @@ void RewardTesterPlugin::OnPhysicsTick(ServerWrapper server, void *params) {
     }
 
     if (snap.tickSkip < 1) snap.tickSkip = 1;
-    client_->SubmitCapture(snap);
-    if (autosaveTicks > 0 && ++autosaveCounter >= autosaveTicks) {
-        autosaveCounter = 0;
-        SaveClip("match_" + std::to_string(autosaveIndex++));
-    }
-    if (physicsTickCount % (uint64_t) snap.tickSkip == 0) {
-        client_->SubmitState(snap);
-        latchedWorldContactHas = false;
-        latchedWorldContactNormal[0] = 0.0f;
-        latchedWorldContactNormal[1] = 0.0f;
-        latchedWorldContactNormal[2] = 1.0f;
+    if (fromReplay) {
+        snap.tickSkip = std::max(1, tickAdvance);
+        snap.captureTicks = snap.tickSkip;
+        client_->SubmitCapture(snap);
+        if (watchEvaluate) client_->SubmitState(snap);
+    } else {
+        client_->SubmitCapture(snap);
+        if (autosaveTicks > 0 && ++autosaveCounter >= autosaveTicks) {
+            autosaveCounter = 0;
+            SaveClip("match_" + std::to_string(autosaveIndex++));
+        }
+        if (physicsTickCount % (uint64_t) snap.tickSkip == 0) {
+            client_->SubmitState(snap);
+            latchedWorldContactHas = false;
+            latchedWorldContactNormal[0] = 0.0f;
+            latchedWorldContactNormal[1] = 0.0f;
+            latchedWorldContactNormal[2] = 1.0f;
+        }
     }
 
     RewardResult res = client_->LatestResult();
@@ -827,6 +867,101 @@ void RewardTesterPlugin::OnPhysicsTick(ServerWrapper server, void *params) {
         for (size_t i = 0; i < res.values.size(); ++i)
             rollingAvgValues[i] = rollingAvgValues[i] * (1.0f - fadeAlpha) + res.values[i] * fadeAlpha;
     }
+    RecordTermHistory(res);
+    CheckAlerts(res);
+}
+
+void RewardTesterPlugin::RecordTermHistory(const RewardResult &res) {
+    if (!res.valid || res.values.empty()) return;
+    if (++historyCounter % 4 != 0) return;
+    std::lock_guard<std::mutex> lock(historyMut);
+    if (termHistory.size() != res.values.size()) termHistory.assign(res.values.size(), std::deque<float>());
+    for (size_t i = 0; i < res.values.size(); ++i) {
+        termHistory[i].push_back(res.values[i]);
+        if (termHistory[i].size() > 150) termHistory[i].pop_front();
+    }
+}
+
+void RewardTesterPlugin::CheckAlerts(const RewardResult &res) {
+    if (alerts.empty() || !res.valid) return;
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    for (auto &alert : alerts) {
+        const auto it = std::find(res.names.begin(), res.names.end(), alert.term);
+        if (it == res.names.end()) continue;
+        const size_t index = static_cast<size_t>(it - res.names.begin());
+        if (index >= res.values.size()) continue;
+        const float value = res.values[index];
+        const bool hit = alert.above ? value > alert.value : value < alert.value;
+        if (!hit || now - alert.lastFired < 3.0) continue;
+        alert.lastFired = now;
+        gameWrapper->Toast("Reward Tester", alert.term + (alert.above ? " above " : " below ") + std::to_string(alert.value) +
+                           " (now " + std::to_string(value) + ")", "default", 3.0f, ToastType_Warning);
+    }
+}
+
+void RewardTesterPlugin::SampleReplay() {
+    if (pluginUnloading) return;
+    gameWrapper->SetTimeout([this](GameWrapper *) { SampleReplay(); }, 0.016f);
+
+    watch.inReplay = gameWrapper->IsInReplay();
+    if (!watch.inReplay) {
+        watch.frame = -1;
+        watch.lastSentFrame = -1;
+        return;
+    }
+    if (!client_ || replayActive) return;
+
+    ReplayServerWrapper replay = gameWrapper->GetGameEventAsReplay();
+    if (!replay || replay.IsNull()) return;
+
+    const int frame = replay.GetCurrentReplayFrame();
+    const int fps = std::max(1, replay.GetReplayFPS());
+    watch.frame = frame;
+    watch.fps = fps;
+
+    ArrayWrapper<CarWrapper> cars = replay.GetCars();
+    watch.cars = cars.Count();
+    if (watch.cars == 0) return;
+
+    ActorWrapper target = replay.GetViewTarget();
+    CarWrapper subject(0);
+    int subjectIndex = -1;
+    for (int i = 0; i < cars.Count(); ++i) {
+        CarWrapper car = cars.Get(i);
+        if (!car || car.IsNull()) continue;
+        PriWrapper pri = car.GetPRI();
+        const bool followed = target && !target.IsNull() &&
+                              (car.memory_address == target.memory_address ||
+                               (pri && !pri.IsNull() && pri.memory_address == target.memory_address));
+        if (followed) {
+            subject = car;
+            subjectIndex = i;
+            break;
+        }
+    }
+    if (subjectIndex < 0) {
+        subject = cars.Get(0);
+        subjectIndex = 0;
+        watch.followedName = "(no player followed, using car 0)";
+    } else {
+        PriWrapper pri = subject.GetPRI();
+        watch.followedName = pri && !pri.IsNull() ? pri.GetPlayerName().ToString() : "car " + std::to_string(subjectIndex);
+    }
+    watch.followedIndex = subjectIndex;
+    if (!subject || subject.IsNull()) return;
+
+    if (frame == watch.lastSentFrame) return;
+    const int ticksPerFrame = std::max(1, static_cast<int>(std::lround(120.0f / fps)));
+    const int delta = frame - watch.lastSentFrame;
+    int advance = ticksPerFrame;
+    if (watch.lastSentFrame < 0 || delta < 1 || delta > 4) {
+        client_->RequestReset(true);
+    } else {
+        advance = delta * ticksPerFrame;
+    }
+    watch.lastSentFrame = frame;
+    ++watch.samples;
+    SubmitSnapshot(replay, subject, advance, true);
 }
 
 
@@ -1319,375 +1454,37 @@ void RewardTesterPlugin::Render() {
     if (ImGui::GetCurrentContext() == nullptr || !isWindowOpen) return;
 
     HandleReplayKeys();
-    bool connected = client_ && client_->Connected();
 
-    ImGui::SetNextWindowSize(ImVec2(640, 720), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(680, 760), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Reward & State Inspector", &isWindowOpen, ImGuiWindowFlags_NoCollapse)) {
-        if (connected)
-            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "CONNECTED (%d terms) | Total Reward: %.4f",
-                               client_ ? client_->RewardCount() : 0, totalWeightedReward);
-        else
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "DISCONNECTED -- %s",
-                               client_ ? client_->LastError().c_str() : "no client");
-        ImGui::Text("Physics Ticks Evaluated: %llu", (unsigned long long) physicsTickCount);
-        ImGui::Separator();
+        DrawHeader();
 
         if (ImGui::BeginTabBar("InspectorTabs")) {
-            if (ImGui::BeginTabItem("Live Rewards")) {
-                ImGui::InputText("Server Host", serverHostBuf, sizeof(serverHostBuf));
-                ImGui::InputInt("Port", &serverPort);
-                ImGui::InputTextWithHint("Config (server-side)", "empty = the server's own config", configFilePathBuf,
-                                         sizeof(configFilePathBuf));
-                if (ImGui::Button("Connect / Reconnect")) Reconnect();
-                ImGui::SameLine();
-                if (ImGui::Button("Reload Config")) ReloadConfig();
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.35f, 0.05f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.45f, 0.1f, 1.0f));
-                if (ImGui::Button("Reset Reward State")) {
-                    SendRewardReset();
-                    cvarManager->log("[RewardTester] Manual reward state reset sent.");
-                }
-                ImGui::PopStyleColor(2);
-                ImGui::SameLine();
-                ImGui::TextDisabled("(auto on goal/freeplay reset)");
-                if (ImGui::Button(("Save Last " + std::to_string((int) clipDurationSeconds) + "s (.rlpr)").c_str()))
-                    SaveClip(std::string());
-                ImGui::SameLine();
-                ImGui::TextDisabled("server keeps a rolling window; no need to arm it");
-                if (client_) {
-                    const auto cs = client_->LatestClipState();
-                    if (cs.pending) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "saving...");
-                    } else if (!cs.lastSavedPath.empty()) {
-                        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "saved: %s", cs.lastSavedPath.c_str());
-                    }
-                }
-                ImGui::TextDisabled("Reward code changes: rebuild + restart reward_server (auto-reconnects).");
-
-                uint64_t stepMin = 0;
-                uint64_t stepMax = 1000000000000ULL;
-                ImGui::InputScalar("Step Input", ImGuiDataType_U64, &currentTrainingStep);
-                ImGui::SliderScalar("Training Step", ImGuiDataType_U64, &currentTrainingStep, &stepMin, &stepMax,
-                                    "%llu steps");
-                ImGui::Checkbox("Force late-schedule step (fully faded-in weights)", &forceAllPhases);
-                ImGui::Checkbox("Reward debug logging (reward_server console)", &debugRewards);
-
-                if (ImGui::Button("Reset 0")) currentTrainingStep = 0;
-                ImGui::SameLine();
-                if (ImGui::Button("+1B")) currentTrainingStep += 1000000000ULL;
-                ImGui::SameLine();
-                if (ImGui::Button("+10B")) currentTrainingStep += 10000000000ULL;
-                ImGui::SameLine();
-                if (ImGui::Button("+50B")) currentTrainingStep += 50000000000ULL;
-
-                ImGui::SliderInt("Rolling Avg Memory (ticks)", &fadingTimesteps, 10, 1200);
-
-                ImGui::Separator();
-                RewardResult res = client_ ? client_->LatestResult() : RewardResult{};
-                ImGui::Text("Reward Terms (%d):", (int) res.names.size());
-
-                ImGui::TextDisabled("Raw = the reward's signal (ignores weight). Weighted = Raw x Weight.");
-                if (ImGui::BeginChild("RewardList", ImVec2(0, 300), true)) {
-                    ImGui::Columns(5, "terms", true);
-                    ImGui::Text("Name");
-                    ImGui::NextColumn();
-                    ImGui::Text("Weight");
-                    ImGui::NextColumn();
-                    ImGui::Text("Raw");
-                    ImGui::NextColumn();
-                    ImGui::Text("Weighted");
-                    ImGui::NextColumn();
-                    ImGui::Text("Avg(raw)");
-                    ImGui::NextColumn();
-                    ImGui::Separator();
-
-                    for (size_t i = 0; i < res.names.size(); ++i) {
-                        float w = i < res.weights.size() ? res.weights[i] : 0.0f;
-                        float v = i < res.values.size() ? res.values[i] : 0.0f;
-                        float wv = i < res.weighted.size() ? res.weighted[i] : 0.0f;
-                        float avg = i < rollingAvgValues.size() ? rollingAvgValues[i] : 0.0f;
-                        ImVec4 col = v > 0
-                                         ? ImVec4(0.5f, 1.0f, 0.5f, 1.0f)
-                                         : v < 0
-                                               ? ImVec4(1.0f, 0.5f, 0.5f, 1.0f)
-                                               : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
-                        ImGui::TextUnformatted(res.names[i].c_str());
-                        ImGui::NextColumn();
-                        ImGui::Text("%.3f", w);
-                        ImGui::NextColumn();
-                        ImGui::TextColored(col, "%.4f", v);
-                        ImGui::NextColumn();
-                        ImGui::Text("%.4f", wv);
-                        ImGui::NextColumn();
-                        ImGui::Text("%.4f", avg);
-                        ImGui::NextColumn();
-                    }
-                    ImGui::Columns(1);
-                    ImGui::EndChild();
-                }
+            if (ImGui::BeginTabItem("Live")) {
+                DrawLiveTab();
                 ImGui::EndTabItem();
             }
-
-            if (ImGui::BeginTabItem("Shot Tasks & Suite")) {
-                ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Interactive Empirical Shot Validation Suite");
-                ImGui::TextDisabled(
-                    "Select target shot, execute in freeplay, and save attempt clips tagged for analysis.");
-                ImGui::Separator();
-
-                std::vector<ShotTask> shotTasks = client_ ? client_->LatestTasks() : std::vector<ShotTask>{};
-                int activeTaskIdx = client_ ? client_->ActiveTaskIndex() : 0;
-
-                const std::string serverTasksPath = client_ ? client_->TasksPath() : std::string();
-                if (!serverTasksPath.empty() && serverTasksPath != syncedTasksJsonPath) {
-                    syncedTasksJsonPath = serverTasksPath;
-                    std::snprintf(tasksJsonPathBuf, sizeof(tasksJsonPathBuf), "%s", serverTasksPath.c_str());
-                }
-                ImGui::InputText("Tasks JSON (Server)", tasksJsonPathBuf, sizeof(tasksJsonPathBuf));
-                ImGui::SameLine();
-                if (ImGui::Button("Reload Tasks on Server")) {
-                    if (client_) client_->RequestReloadTasks(tasksJsonPathBuf);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Reset All Shots")) {
-                    if (client_) client_->RequestResetTask(-1);
-                }
-
-                ImGui::Separator();
-                ImGui::Text("Test Shot Catalog (3 attempts per shot, synced from server):");
-                if (shotTasks.empty()) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
-                                       "No shot tasks loaded from server. Is reward_server running?");
-                } else {
-                    for (size_t i = 0; i < shotTasks.size(); ++i) {
-                        auto &t = shotTasks[i];
-                        bool isSelected = ((int) i == activeTaskIdx);
-                        if (ImGui::RadioButton(t.name.c_str(), isSelected)) {
-                            if (client_) client_->RequestSetActiveTask((int) i);
-                        }
-                        ImGui::SameLine();
-                        if (t.completedAttempts >= t.targetAttempts) {
-                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.3f, 1.0f), " [DONE %d/%d (%d scored)]",
-                                               t.completedAttempts, t.targetAttempts, t.successfulAttempts);
-                        } else if (t.completedAttempts > 0) {
-                            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), " [%d/%d attempts (%d scored)]",
-                                               t.completedAttempts, t.targetAttempts, t.successfulAttempts);
-                        } else {
-                            ImGui::TextDisabled(" [0/%d]", t.targetAttempts);
-                        }
-                    }
-
-                    ImGui::Separator();
-                    if (activeTaskIdx >= 0 && activeTaskIdx < (int) shotTasks.size()) {
-                        auto &cur = shotTasks[activeTaskIdx];
-                        ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.4f, 1.0f), "Active Target: %s", cur.name.c_str());
-                        ImGui::TextWrapped("Instructions: %s", cur.instructions.c_str());
-                        ImGui::TextDisabled("Expected Mode: %s", cur.expectedMode.c_str());
-
-                        ImGui::Spacing();
-                        ImGui::TextDisabled(
-                            "Flow: [X] saves the shot as the next attempt, then [NumPad*] scored or [NumPad/] miss"
-                            " marks it. Pressing the other one corrects it. [NumPad.] undoes the attempt.");
-                        const LastAttemptInfo last = client_ ? client_->LastAttempt() : LastAttemptInfo{};
-                        if (last.number > 0)
-                            ImGui::Text("Latest attempt: #%d, %s", last.number,
-                                        last.outcome == "unmarked" ? "not marked yet (counts as miss)" : last.outcome.c_str());
-                        else
-                            ImGui::TextDisabled("Latest attempt: none");
-                        ImGui::Spacing();
-                        std::string saveLabel = "Save Attempt Clip [X] (" + cur.tag + "_#" + std::to_string(
-                                                    cur.completedAttempts + 1) + ")";
-                        if (ImGui::Button(saveLabel.c_str())) {
-                            if (client_) client_->RequestSaveTaskClip();
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Mark Scored [NumPad*]")) {
-                            if (client_) client_->RequestLogTaskAttempt(true);
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Mark Miss [NumPad/]")) {
-                            if (client_) client_->RequestLogTaskAttempt(false);
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Undo Attempt [NumPad.]")) {
-                            if (client_) client_->RequestUndoTaskAttempt();
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Reset Shot")) {
-                            if (client_) client_->RequestResetTask(activeTaskIdx);
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Next Shot [NumPad+]")) {
-                            if (client_ && !shotTasks.empty()) {
-                                int next = (activeTaskIdx + 1) % (int) shotTasks.size();
-                                client_->RequestSetActiveTask(next);
-                            }
-                        }
-                    }
-                }
-
-                ImGui::Separator();
-                ImGui::Text("Live Signal Breakdown (active terms):");
-                RewardResult res = client_ ? client_->LatestResult() : RewardResult{};
-                if (ImGui::BeginChild("ShotLiveSignals", ImVec2(0, 160), true)) {
-                    for (size_t i = 0; i < res.names.size(); ++i) {
-                        const float v = i < res.values.size() ? res.values[i] : 0.0f;
-                        if (std::abs(v) <= 1e-3f) continue;
-                        const float w = i < res.weights.size() ? res.weights[i] : 0.0f;
-                        const float wv = i < res.weighted.size() ? res.weighted[i] : 0.0f;
-                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%-30s | Raw: %7.3f | Wgt: %5.2f | Wgtd: %7.3f",
-                                           res.names[i].c_str(), v, w, wv);
-                    }
-                    ImGui::EndChild();
-                }
+            if (ImGui::BeginTabItem("Shots")) {
+                DrawShotsTab();
                 ImGui::EndTabItem();
             }
-
-            if (ImGui::BeginTabItem("State Inspector & Clips")) {
-                ImGui::TextDisabled("Clips are written by the reward server as .rlpr, readable by the RLPR tooling.");
-                if (client_) {
-                    const auto cs = client_->LatestClipState();
-                    if (ImGui::Button(("Save Last " + std::to_string((int) clipDurationSeconds) + "s").c_str()))
-                        SaveClip(std::string());
-                    ImGui::SameLine();
-                    if (ImGui::Button("Refresh List")) RefreshClipList();
-                    if (ImGui::SliderFloat("Clip Duration (seconds)", &clipDurationSeconds, 1.0f, 300.0f, "%.0f")) {
-                        clipDurationSeconds = std::clamp(clipDurationSeconds, 1.0f, 300.0f);
-                        SavePreferences();
-                        if (client_) client_->RequestSetClipWindow(clipDurationSeconds);
-                    }
-                    bool inputChanged = false;
-                    inputChanged |= ImGui::SliderFloat("Steering Sensitivity (match RL settings)", &inputSteerSensitivity, 1.0f, 10.0f, "%.2f");
-                    inputChanged |= ImGui::SliderFloat("Aerial Sensitivity (match RL settings)", &inputAerialSensitivity, 1.0f, 10.0f, "%.2f");
-                    inputChanged |= ImGui::SliderFloat("Controller Deadzone (match RL settings)", &inputDeadzone, 0.0f, 0.5f, "%.2f");
-                    if (inputChanged) SavePreferences();
-                    if (!cs.folder.empty()) ImGui::TextDisabled("folder: %s", cs.folder.c_str());
-                    if (!cs.lastSavedPath.empty())
-                        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "last saved: %s", cs.lastSavedPath.c_str());
-
-                    ImGui::Separator();
-                    ImGui::Text("Create folder");
-                    ImGui::InputText("##new_clip_folder", newClipFolderBuf, sizeof(newClipFolderBuf));
-                    ImGui::SameLine();
-                    if (ImGui::Button("Create") && newClipFolderBuf[0] != '\0') {
-                        client_->RequestCreateClipFolder(newClipFolderBuf);
-                        newClipFolderBuf[0] = '\0';
-                    }
-                    ImGui::Text("Rename selected path");
-                    ImGui::InputText("##rename_clip_path", renameClipBuf, sizeof(renameClipBuf));
-                    ImGui::SameLine();
-                    if (ImGui::Button("Rename") && !selectedClipPath.empty() && renameClipBuf[0] != '\0') {
-                        client_->RequestRenameClipPath(selectedClipPath, renameClipBuf);
-                        renameClipBuf[0] = '\0';
-                    }
-                    ImGui::Text("Move selected clip to folder");
-                    ImGui::InputText("##move_clip_folder", moveClipBuf, sizeof(moveClipBuf));
-                    ImGui::SameLine();
-                    if (ImGui::Button("Move") && !selectedClipPath.empty() && moveClipBuf[0] != '\0') {
-                        client_->RequestMoveClip(selectedClipPath, moveClipBuf);
-                        moveClipBuf[0] = '\0';
-                    }
-                    if (!selectedClipPath.empty())
-                        ImGui::TextDisabled("Selected: %s", selectedClipPath.c_str());
-                    ImGui::Separator();
-                    ImGui::Text("Clips on disk: %d", (int) cs.clips.size());
-                    std::vector<ClipGroupEntry> groups;
-                    BuildClipGroups(groups);
-                    float clipListHeight = ImGui::GetContentRegionAvail().y;
-                    if (replayActive) clipListHeight -= 110.0f;
-                    ImGui::BeginChild("cliplist", ImVec2(0, std::max(0.0f, clipListHeight)), true);
-                    auto renderGroups = [&](auto&& self, const std::vector<ClipGroupEntry>& current,
-                                            const std::string& prefix) -> void {
-                        for (const auto& group : current) {
-                            ImGui::PushID((prefix + group.group).c_str());
-                            auto countItems = [&](auto&& count, const ClipGroupEntry& entry) -> size_t {
-                                size_t countValue = entry.items.size();
-                                for (const auto& child : entry.children)
-                                    countValue += count(count, child);
-                                return countValue;
-                            };
-                            const std::string label = group.group + " (" + std::to_string(countItems(countItems, group)) + ")";
-                            if (!clipGroupsInitialized)
-                                ImGui::SetNextItemOpen(false, ImGuiCond_Always);
-                            const bool open = ImGui::CollapsingHeader(label.c_str());
-                            if (open) {
-                                for (const auto& clip : group.items) {
-                                    const auto it = std::find(cs.clips.begin(), cs.clips.end(), clip);
-                                    if (it == cs.clips.end()) continue;
-                                    const int clipIndex = static_cast<int>(std::distance(cs.clips.begin(), it));
-                                    const bool sel = clipIndex == selectedClipIndex;
-                                    const std::string clipLabel = std::filesystem::path(clip).filename().string();
-                                    if (ImGui::Selectable(clipLabel.c_str(), sel)) {
-                                        selectedClipIndex = clipIndex;
-                                        selectedClipPath = clip;
-                                        OpenReplayClip(clip);
-                                    }
-                                    if (ImGui::IsItemHovered())
-                                        ImGui::SetTooltip("%s", clip.c_str());
-                                }
-                                self(self, group.children, prefix + group.group + "/");
-                            }
-                            ImGui::PopID();
-                        }
-                    };
-                    renderGroups(renderGroups, groups, std::string());
-                    ImGui::EndChild();
-                    clipGroupsInitialized = true;
-                    if (replayActive) {
-                        ImGui::Separator();
-                        ImGui::Text("Replay: %s", activeReplayPath.c_str());
-                        ImGui::Text("Recorded cars: %zu (%s)", replayCarCount,
-                                    replayCarCount <= 1 ? "freeplay / single-car" : "multi-car");
-                        const float replayDuration = replayFrames.size() > 1
-                            ? static_cast<float>(replayFrames.size() - 1) * replayFrameIntervalSeconds
-                            : 0.0f;
-                        ImGui::Text("Progress: %.2f / %.2f s  |  Frame %zu / %zu",
-                                    replayTime, replayDuration, replayFrameIndex + 1, replayFrames.size());
-                        ImGui::Checkbox("Playing", &isPlayingClip);
-                        ImGui::Checkbox("Loop", &replayLoop);
-                        ImGui::SliderFloat("Speed", &replayRate, 0.1f, 50.0f, "%.2fx");
-                        ImGui::SameLine();
-                        ImGui::Checkbox("Fun mode", &funReplayMode);
-                        ImGui::SameLine();
-                        ImGui::Checkbox("Input-driven (resim)", &replayInputDriven);
-                        if (ImGui::Button("Stop Replay")) StopReplayClip();
-                        ImGui::SameLine();
-                        if (ImGui::Button("Restart Replay")) replayTime = 0.0f;
-                    }
-                } else {
-                    ImGui::Text("No recording captured yet. Click 'Start Recording Clip'.");
-                }
+            if (ImGui::BeginTabItem("Clips")) {
+                DrawClipsTab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(watch.inReplay ? "Watch *" : "Watch")) {
+                DrawWatchTab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Settings")) {
+                DrawSettingsTab();
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
         }
     }
     ImGui::End();
-
-    if (replayActive && !replayFrames.empty()) {
-        const float duration = replayFrames.size() > 1
-            ? static_cast<float>(replayFrames.size() - 1) * replayFrameIntervalSeconds
-            : 0.0f;
-        const float progress = duration > 0.0f ? std::clamp(replayTime / duration, 0.0f, 1.0f) : 0.0f;
-        const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-        ImGui::SetNextWindowPos(ImVec2(displaySize.x * 0.5f, 24.0f),
-                                ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-        ImGui::SetNextWindowSize(ImVec2(420.0f, 58.0f), ImGuiCond_Always);
-        const ImGuiWindowFlags overlayFlags =
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_NoSavedSettings |
-            ImGuiWindowFlags_NoInputs |
-            ImGuiWindowFlags_NoFocusOnAppearing |
-            ImGuiWindowFlags_NoNav |
-            ImGuiWindowFlags_NoBringToFrontOnFocus;
-        if (ImGui::Begin("RewardReplayOverlay", nullptr, overlayFlags)) {
-            ImGui::TextUnformatted(isPlayingClip ? "REPLAY PLAYING" : "REPLAY PAUSED");
-            ImGui::SameLine();
-            ImGui::Text("%.2f / %.2f s", replayTime, duration);
-            ImGui::ProgressBar(progress, ImVec2(-1.0f, 14.0f));
-        }
-        ImGui::End();
-    }
+    DrawReplayOverlay();
 
     if (!isWindowOpen) {
         gameWrapper->Execute([this](GameWrapper *gw) {
@@ -1695,3 +1492,4 @@ void RewardTesterPlugin::Render() {
         });
     }
 }
+

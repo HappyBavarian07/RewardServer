@@ -48,6 +48,7 @@ struct RewardStateSnapshot {
     bool forceAll = false;
     bool debug = false;
     int tickSkip = 8;
+    int captureTicks = 1;
     int focus = 0;
     int blueScore = 0;
     int orangeScore = 0;
@@ -71,6 +72,11 @@ struct ShotTask {
     int targetAttempts = 3;
     int completedAttempts = 0;
     int successfulAttempts = 0;
+};
+
+struct ClipRequest {
+    bool onlyFocus = false;
+    std::string source = "live";
 };
 
 struct TaskNotice {
@@ -103,9 +109,9 @@ public:
 
     void RequestLoad(const std::string &config);
 
-    void RequestReset();
+    void RequestReset(bool clearBuffer = false);
 
-    void RequestSaveClip(const std::string &name = std::string());
+    void RequestSaveClip(const std::string &name = std::string(), ClipRequest request = {});
 
     void RequestListClips();
 
@@ -143,7 +149,7 @@ public:
 
     void RequestReloadTasks(const std::string &path = "");
 
-    void RequestSaveTaskClip();
+    void RequestSaveTaskClip(ClipRequest request = {});
 
     std::vector<ShotTask> LatestTasks();
 
@@ -169,7 +175,7 @@ private:
 
     bool DoCapture(const RewardStateSnapshot &snap);
 
-    bool DoSaveClip(const std::string &name);
+    bool DoSaveClip(const std::string &name, const ClipRequest &request);
 
     bool DoListClips();
 
@@ -191,7 +197,7 @@ private:
 
     bool DoReloadTasks(const std::string &path);
 
-    bool DoSaveTaskClip();
+    bool DoSaveTaskClip(const ClipRequest &request);
 
     bool Rpc(const std::string &reqLine, std::string &respLine);
 
@@ -210,6 +216,9 @@ private:
     bool needSetClipWindow_ = false;
     float pendingClipWindowSeconds_ = 15.0f;
     std::string pendingClipName_;
+    ClipRequest pendingClipRequest_;
+    ClipRequest pendingTaskClipRequest_;
+    bool pendingResetClear_ = false;
 
     std::mutex taskMut_;
     std::vector<ShotTask> tasks_;

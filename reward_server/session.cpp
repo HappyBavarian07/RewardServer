@@ -24,6 +24,10 @@ bool ResolveClipPath(const RewardEval& eval, const std::string& relative, fs::pa
     return true;
 }
 
+RewardEval::ClipOptions ClipOptionsFrom(const json& req) {
+    return {req.value("only_focus", false), req.value("source", std::string("live"))};
+}
+
 json RenameResult(const fs::path& from, const fs::path& to) {
     std::error_code ec;
     fs::rename(from, to, ec);
@@ -75,8 +79,9 @@ void Session::RegisterRewardCommands() {
         if (!eval_.Capture(req)) return Fail("capture failed (no cars)");
         return json{{"ok", true}, {"frames", eval_.BufferedFrames()}};
     };
-    handlers_["reset"] = [this](const json&) {
+    handlers_["reset"] = [this](const json& req) {
         eval_.Reset();
+        if (req.value("clear_buffer", false)) eval_.ClearBuffers();
         return Ok();
     };
 }
@@ -84,7 +89,7 @@ void Session::RegisterRewardCommands() {
 void Session::RegisterClipCommands() {
     handlers_["save_clip"] = [this](const json& req) {
         std::string path, err;
-        if (!eval_.SaveClip(req.value("name", std::string()), path, err, req.value("subfolder", "generic")))
+        if (!eval_.SaveClip(req.value("name", std::string()), path, err, req.value("subfolder", "generic"), ClipOptionsFrom(req)))
             return Fail(err);
         printf("[server] saved clip: %s (%d frames)\n", path.c_str(), eval_.BufferedFrames());
         return json{{"ok", true}, {"path", path}, {"frames", eval_.BufferedFrames()}};
@@ -166,7 +171,7 @@ void Session::RegisterTaskCommands() {
         if (req.contains("clip_folder") && req["clip_folder"].is_string())
             eval_.SetClipFolder(req["clip_folder"].get<std::string>());
         std::string path, err;
-        if (!eval_.SaveTaskClip(path, err, req.value("subfolder", ""))) return Fail(err);
+        if (!eval_.SaveTaskClip(path, err, req.value("subfolder", ""), ClipOptionsFrom(req))) return Fail(err);
         json reply = TaskReply();
         reply["path"] = path;
         return reply;

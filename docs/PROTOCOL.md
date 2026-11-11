@@ -17,8 +17,8 @@ Anything that speaks this can drive the server. `tests/smoke_client.py` is a min
 | `load` | `config` | `count`, `names` |
 | `reload` | | `count`, `names` (reuses the last `config`) |
 | `eval` | see below | `total`, `names`, `values`, `weights`, `weighted` |
-| `capture` | same state fields as `eval` | `frames` (buffers a tick without evaluating) |
-| `reset` | | clears per-episode reward state |
+| `capture` | same state fields as `eval`; `tick_skip` is how many physics ticks the tick spans (default 1) | `frames` (buffers a tick without evaluating) |
+| `reset` | `clear_buffer` (default false) | clears per-episode reward state; with `clear_buffer` also empties the clip buffers |
 
 ### `eval` request
 
@@ -58,7 +58,7 @@ Car fields (all optional, defaults are zero or identity):
 
 | cmd | request fields | reply fields |
 |---|---|---|
-| `save_clip` | `name`, `subfolder` (default `generic`) | `path`, `frames` |
+| `save_clip` | `name`, `subfolder` (default `generic`), `only_focus` (keep the ball and car 0 only), `source` (`live` or `replay`) | `path`, `frames` |
 | `list_clips` | | `folder`, `clips` |
 | `clip_info` | | `folder`, `window_seconds`, `buffered_frames` |
 | `set_clip_window` | `seconds` (minimum 1) | `window_seconds` |
@@ -80,7 +80,7 @@ contain `..`; the server refuses anything else.
 | `undo_task_attempt` | | `active_index`, `tasks`, `message`, `last_attempt`. Fails with `message: "Nothing to undo"` |
 | `reset_task` | `index` (-1 resets all) | `active_index`, `tasks` |
 | `reload_tasks` | `path` | `active_index`, `tasks`, `tasks_path` |
-| `save_task_clip` | `clip_folder`, `subfolder` | `path`, `active_index`, `tasks`, `message`, `last_attempt` |
+| `save_task_clip` | `clip_folder`, `subfolder`, `only_focus`, `source` | `path`, `active_index`, `tasks`, `message`, `last_attempt` |
 
 Every task reply carries a `message`, one line the overlay shows as a toast. `last_attempt` has `task`, `number`, `outcome` (`none`, `unmarked`, `scored` or `miss`) and `clip`.
 

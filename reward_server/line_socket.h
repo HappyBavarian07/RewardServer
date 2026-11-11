@@ -4,7 +4,6 @@
 
 namespace rs {
 
-/** Newline-framed reader/writer over one accepted socket; owns and closes the handle. */
 class LineSocket {
 public:
     static constexpr size_t kMaxLineBytes = 16u << 20;
@@ -14,7 +13,6 @@ public:
     LineSocket(const LineSocket&) = delete;
     LineSocket& operator=(const LineSocket&) = delete;
 
-    /** Blocks for the next line without its terminator; false on disconnect or an oversized line. */
     bool RecvLine(std::string& out) {
         for (;;) {
             const size_t nl = buf_.find('\n');

@@ -73,11 +73,16 @@ struct ShotTask {
     int successfulAttempts = 0;
 };
 
-/**
- * TCP client for reward_server. All socket I/O runs on a worker thread so the game thread never blocks:
- * SubmitState hands off the newest state, LatestResult returns the newest result, and the worker connects
- * (auto-reconnecting), loads the config and evaluates.
- */
+struct TaskNotice {
+    std::string text;
+    uint64_t seq = 0;
+};
+
+struct LastAttemptInfo {
+    int number = 0;
+    std::string outcome = "none";
+};
+
 class RewardClient {
 public:
     RewardClient() = default;
@@ -98,10 +103,8 @@ public:
 
     void RequestLoad(const std::string &config);
 
-    /** Clears per-player reward state on the server; call on goal and freeplay reset. */
     void RequestReset();
 
-    /** Writes the server's rolling window to <clipFolder>/<name>.rlpr; an empty name auto-timestamps. */
     void RequestSaveClip(const std::string &name = std::string());
 
     void RequestListClips();
@@ -130,6 +133,12 @@ public:
 
     void RequestLogTaskAttempt(bool scored);
 
+    void RequestUndoTaskAttempt();
+
+    TaskNotice LatestTaskNotice();
+
+    LastAttemptInfo LastAttempt();
+
     void RequestResetTask(int index = -1);
 
     void RequestReloadTasks(const std::string &path = "");
@@ -140,7 +149,6 @@ public:
 
     int ActiveTaskIndex();
 
-    /// Task list file the server currently has loaded (empty until the first sync).
     std::string TasksPath();
 
     RewardResult LatestResult();
@@ -175,6 +183,10 @@ private:
 
     bool DoLogTaskAttempt(bool scored);
 
+    bool DoUndoTaskAttempt();
+
+    bool ApplyTaskReply(const std::string &resp, bool notify);
+
     bool DoResetTask(int index);
 
     bool DoReloadTasks(const std::string &path);
@@ -208,6 +220,10 @@ private:
     int pendingSetActiveTaskIndex_ = 0;
     bool needLogTaskAttempt_ = false;
     bool pendingLogAttemptScored_ = false;
+    bool needUndoTaskAttempt_ = false;
+    std::string taskNotice_;
+    uint64_t taskNoticeSeq_ = 0;
+    LastAttemptInfo lastAttempt_;
     bool needResetTask_ = false;
     int pendingResetTaskIndex_ = -1;
     bool needReloadTasks_ = false;

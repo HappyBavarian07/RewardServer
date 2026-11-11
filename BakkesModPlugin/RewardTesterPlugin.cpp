@@ -98,65 +98,32 @@ void RewardTesterPlugin::onLoad() {
     }, "Save the last seconds of play as a .rlpr clip", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_save_task_clip", [this](std::vector<std::string> args) {
-        if (client_) {
-            client_->RequestSaveTaskClip();
-            auto tasks = client_->LatestTasks();
-            int idx = client_->ActiveTaskIndex();
-            std::string name = (idx >= 0 && idx < (int) tasks.size()) ? tasks[idx].name : "Active Task";
-            int attempt = (idx >= 0 && idx < (int) tasks.size()) ? tasks[idx].completedAttempts + 1 : 1;
-            gameWrapper->Toast("Reward Tester", "Saved Clip: " + name + " (Attempt #" + std::to_string(attempt) + ")",
-                               "default", 3.0f, ToastType_OK);
-            cvarManager->log("[RewardTester] Requested server to save active task clip.");
-        }
-    }, "Save rolling window clip tagged for the active shot task", PERMISSION_ALL);
+        if (client_) client_->RequestSaveTaskClip();
+    }, "Save the rolling window as the next attempt of the active shot task", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_mark_scored", [this](std::vector<std::string> args) {
-        if (client_) {
-            client_->RequestLogTaskAttempt(true);
-            auto tasks = client_->LatestTasks();
-            int idx = client_->ActiveTaskIndex();
-            std::string name = (idx >= 0 && idx < (int) tasks.size()) ? tasks[idx].name : "Active Task";
-            gameWrapper->Toast("Reward Tester", "Marked Scored: " + name, "default", 2.5f, ToastType_OK);
-            cvarManager->log("[RewardTester] Marked active shot attempt as scored.");
-        }
-    }, "Mark active shot task attempt as scored", PERMISSION_ALL);
+        if (client_) client_->RequestLogTaskAttempt(true);
+    }, "Mark the latest attempt as scored (changes a miss to scored)", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_mark_miss", [this](std::vector<std::string> args) {
-        if (client_) {
-            client_->RequestLogTaskAttempt(false);
-            auto tasks = client_->LatestTasks();
-            int idx = client_->ActiveTaskIndex();
-            std::string name = (idx >= 0 && idx < (int) tasks.size()) ? tasks[idx].name : "Active Task";
-            gameWrapper->Toast("Reward Tester", "Marked Miss: " + name, "default", 2.5f, ToastType_Warning);
-            cvarManager->log("[RewardTester] Marked active shot attempt as missed.");
-        }
-    }, "Mark active shot task attempt as missed", PERMISSION_ALL);
+        if (client_) client_->RequestLogTaskAttempt(false);
+    }, "Mark the latest attempt as missed (changes a scored to miss)", PERMISSION_ALL);
+
+    cvarManager->registerNotifier("rewardtester_undo_attempt", [this](std::vector<std::string> args) {
+        if (client_) client_->RequestUndoTaskAttempt();
+    }, "Remove the latest attempt from the counters and keep its clip as _undone", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_next_task", [this](std::vector<std::string> args) {
-        if (client_) {
-            auto tasks = client_->LatestTasks();
-            if (!tasks.empty()) {
-                int cur = client_->ActiveTaskIndex();
-                int next = (cur + 1) % (int) tasks.size();
-                client_->RequestSetActiveTask(next);
-                gameWrapper->Toast("Reward Tester", "Next Task: " + tasks[next].name, "default", 3.0f, ToastType_Info);
-                cvarManager->log("[RewardTester] Switched to next task: " + tasks[next].name);
-            }
-        }
+        if (!client_) return;
+        const auto tasks = client_->LatestTasks();
+        if (!tasks.empty()) client_->RequestSetActiveTask((client_->ActiveTaskIndex() + 1) % (int) tasks.size());
     }, "Switch to the next shot task in the catalog", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_prev_task", [this](std::vector<std::string> args) {
-        if (client_) {
-            auto tasks = client_->LatestTasks();
-            if (!tasks.empty()) {
-                int cur = client_->ActiveTaskIndex();
-                int prev = (cur - 1 + (int) tasks.size()) % (int) tasks.size();
-                client_->RequestSetActiveTask(prev);
-                gameWrapper->Toast("Reward Tester", "Previous Task: " + tasks[prev].name, "default", 3.0f,
-                                   ToastType_Info);
-                cvarManager->log("[RewardTester] Switched to previous task: " + tasks[prev].name);
-            }
-        }
+        if (!client_) return;
+        const auto tasks = client_->LatestTasks();
+        if (!tasks.empty())
+            client_->RequestSetActiveTask((client_->ActiveTaskIndex() - 1 + (int) tasks.size()) % (int) tasks.size());
     }, "Switch to the previous shot task in the catalog", PERMISSION_ALL);
 
     cvarManager->registerNotifier("rewardtester_probe_start", [this](std::vector<std::string> args) {
@@ -576,6 +543,13 @@ void RewardTesterPlugin::ProbeApplyInput(CarWrapper car, ServerWrapper server, C
 
 void RewardTesterPlugin::PollCommandFile() {
     if (pluginUnloading) return;
+    if (client_) {
+        const TaskNotice notice = client_->LatestTaskNotice();
+        if (notice.seq != lastTaskNoticeSeq) {
+            lastTaskNoticeSeq = notice.seq;
+            gameWrapper->Toast("Reward Tester", notice.text, "default", 3.0f, ToastType_Info);
+        }
+    }
     const char *appdata = std::getenv("APPDATA");
     if (appdata) {
         const std::filesystem::path path =
@@ -1283,6 +1257,12 @@ void RewardTesterPlugin::RenderSettings() {
             cvarManager->executeCommand("bind NumPadDivide \"rewardtester_mark_miss\"");
         });
     }
+    ImGui::SameLine();
+    if (ImGui::Button("NumPad. -> Undo Attempt")) {
+        gameWrapper->Execute([this](GameWrapper *gw) {
+            cvarManager->executeCommand("bind Decimal \"rewardtester_undo_attempt\"");
+        });
+    }
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -1300,6 +1280,7 @@ void RewardTesterPlugin::RenderSettings() {
             { "X",              "rewardtester_save_task_clip",  "Save 15s clip tagged for active shot task"  },
             { "NumPad *",       "rewardtester_mark_scored",     "Mark active attempt as Scored"              },
             { "NumPad /",       "rewardtester_mark_miss",       "Mark active attempt as Miss"                },
+            { "NumPad .",       "rewardtester_undo_attempt",    "Remove the latest attempt from the counters" },
             { "NumPad +",       "rewardtester_next_task",       "Switch to next task in catalog"             },
             { "NumPad -",       "rewardtester_prev_task",       "Switch to previous task in catalog"         },
             { "C",              "rewardtester_save_clip",       "Save generic timestamped 15s clip"          },
@@ -1503,8 +1484,14 @@ void RewardTesterPlugin::Render() {
 
                         ImGui::Spacing();
                         ImGui::TextDisabled(
-                            "Keybinds: [X] Save Task Clip  [NumPad*] Mark Scored  [NumPad/] Mark Miss"
-                            "  [NumPad+] Next Task  [NumPad-] Prev Task  [C] Generic Clip");
+                            "Flow: [X] saves the shot as the next attempt, then [NumPad*] scored or [NumPad/] miss"
+                            " marks it. Pressing the other one corrects it. [NumPad.] undoes the attempt.");
+                        const LastAttemptInfo last = client_ ? client_->LastAttempt() : LastAttemptInfo{};
+                        if (last.number > 0)
+                            ImGui::Text("Latest attempt: #%d, %s", last.number,
+                                        last.outcome == "unmarked" ? "not marked yet (counts as miss)" : last.outcome.c_str());
+                        else
+                            ImGui::TextDisabled("Latest attempt: none");
                         ImGui::Spacing();
                         std::string saveLabel = "Save Attempt Clip [X] (" + cur.tag + "_#" + std::to_string(
                                                     cur.completedAttempts + 1) + ")";
@@ -1518,6 +1505,10 @@ void RewardTesterPlugin::Render() {
                         ImGui::SameLine();
                         if (ImGui::Button("Mark Miss [NumPad/]")) {
                             if (client_) client_->RequestLogTaskAttempt(false);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Undo Attempt [NumPad.]")) {
+                            if (client_) client_->RequestUndoTaskAttempt();
                         }
                         ImGui::SameLine();
                         if (ImGui::Button("Reset Shot")) {

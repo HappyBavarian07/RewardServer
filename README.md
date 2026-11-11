@@ -1,15 +1,13 @@
 # RewardServer
 
-Tuning a reward by training and hoping is slow. RewardServer lets you drive the mechanic yourself in Rocket League freeplay and watch every reward term fire while you do it.
-
-A BakkesMod plugin sends your car and the ball to a small local server. The server runs your reward code and sends back one row per term: raw value, weight, weighted value and a rolling average. You can also:
+RewardServer checks reward functions in the real game. You drive in Rocket League freeplay, a BakkesMod plugin sends your car and the ball to a local server, and the server runs your reward code on them. The overlay shows one row per reward term: raw value, weight, weighted value and a rolling average. It also does these:
 
 *   **Save clips**: keep the last seconds of play as an `.rlpr` file, after the interesting moment already happened.
-*   **Work through shot lists**: tag clips against a list of test shots and count attempts, scored and missed.
+*   **Work through shot lists**: tag clips against a list of test shots, mark each attempt scored or missed, and undo or correct a wrong press.
 *   **Replay clips**: play a saved clip back in the game, frame by frame.
 *   **Audit offline**: run any clip through the same reward code from the command line and get per-term totals.
 
-RewardServer has no training code in it. It needs a GigaLearnCPP checkout for the game state and RocketSim, the BakkesMod SDK and MSVC. Your reward plugs in through one source file.
+There's no training code in here. You need a GigaLearnCPP checkout (game state and RocketSim), the BakkesMod SDK and MSVC. Your reward goes in through one source file.
 
 ***
 

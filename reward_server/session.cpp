@@ -47,7 +47,8 @@ Session::Session(RewardEval& eval, std::string initialConfig)
 }
 
 json Session::TaskReply(bool includePath) const {
-    json reply = {{"ok", true}, {"active_index", eval_.ActiveTaskIndex()}, {"tasks", eval_.GetTasksJson()}};
+    json reply = {{"ok", true}, {"active_index", eval_.ActiveTaskIndex()}, {"tasks", eval_.GetTasksJson()},
+                  {"message", eval_.TaskMessage()}, {"last_attempt", eval_.LastAttemptJson()}};
     if (includePath) reply["tasks_path"] = eval_.TasksPath();
     return reply;
 }
@@ -145,7 +146,15 @@ void Session::RegisterTaskCommands() {
         if (!eval_.LogTaskAttempt(req.value("scored", false))) return Fail("failed to log attempt");
         return TaskReply();
     };
-    handlers_["reset_task"] = [this](const json& req) {
+    handlers_["undo_task_attempt"] = [this](const json&) {
+        if (!eval_.UndoTaskAttempt()) {
+            json reply = Fail(eval_.TaskMessage());
+            reply["message"] = eval_.TaskMessage();
+            return reply;
+        }
+        return TaskReply();
+    };
+    handlers_["reset_task"] =[this](const json& req) {
         if (!eval_.ResetTask(req.value("index", -1))) return Fail("failed to reset task");
         return TaskReply();
     };

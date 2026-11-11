@@ -137,6 +137,7 @@ private:
 
     void PollCommandFile();
     bool pluginUnloading = false;
+    uint64_t lastTaskNoticeSeq = 0;
 
     int autosaveTicks = 0;
     int autosaveCounter = 0;

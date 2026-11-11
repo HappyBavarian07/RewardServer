@@ -583,6 +583,8 @@ bool RewardEval::LoadTasks(const std::string& path) {
                     loaded.push_back(t);
                 }
                 tasks_ = std::move(loaded);
+                lastAttempt_ = {};
+                taskMessage_ = "Loaded " + std::to_string(tasks_.size()) + " tasks from " + cand;
                 tasksPath_ = cand;
                 activeTaskIndex_ = tasks_.empty() ? 0 : std::clamp(activeTaskIndex_, 0, (int)tasks_.size() - 1);
                 printf("[server] loaded %d shot tasks from %s (tasklist: %s)\n",
@@ -649,43 +651,94 @@ bool RewardEval::SetActiveTask(int index) {
     if (tasks_.empty()) return false;
     if (index < 0 || index >= (int)tasks_.size()) return false;
     activeTaskIndex_ = index;
-    lastActionWasSaveClip_ = false;
-    printf("[server] active shot task set to [%d] %s\n", activeTaskIndex_, tasks_[activeTaskIndex_].name.c_str());
+    const auto& t = tasks_[index];
+    taskMessage_ = "Task " + std::to_string(index + 1) + "/" + std::to_string(tasks_.size()) + ": " + t.name + " (" +
+                   std::to_string(t.completedAttempts) + "/" + std::to_string(t.targetAttempts) + " attempts)";
+    printf("[server] active shot task set to [%d] %s\n", activeTaskIndex_, t.name.c_str());
     return true;
+}
+
+namespace {
+constexpr auto kRemarkWindow = std::chrono::seconds(90);
+const char* OutcomeName(int outcome) { return outcome == 1 ? "scored" : outcome == 2 ? "miss" : "unmarked"; }
 }
 
 bool RewardEval::LogTaskAttempt(bool scored) {
     if (tasks_.empty()) return false;
     if (activeTaskIndex_ < 0 || activeTaskIndex_ >= (int)tasks_.size()) return false;
     auto& t = tasks_[activeTaskIndex_];
+    const int outcome = scored ? 1 : 2;
+    const auto now = std::chrono::steady_clock::now();
 
-    if (lastActionWasSaveClip_) {
-        if (scored) {
-            t.successfulAttempts = std::min(t.completedAttempts, t.successfulAttempts + 1);
+    const bool remark = lastAttempt_.task == activeTaskIndex_ && lastAttempt_.number > 0 &&
+                        now - lastAttempt_.at <= kRemarkWindow;
+    if (remark) {
+        if (lastAttempt_.outcome == outcome) {
+            taskMessage_ = "Attempt #" + std::to_string(lastAttempt_.number) + " is already " + OutcomeName(outcome) + " (" +
+                           t.name + ")";
+            return true;
         }
-        lastActionWasSaveClip_ = false;
-        SaveTasks();
-        printf("[server] marked saved clip outcome for [%d] %s: %d/%d (scored: %d)\n",
-               activeTaskIndex_, t.name.c_str(), t.completedAttempts, t.targetAttempts, t.successfulAttempts);
-        return true;
+        if (outcome == 1) t.successfulAttempts++;
+        else if (lastAttempt_.outcome == 1) t.successfulAttempts = std::max(0, t.successfulAttempts - 1);
+        const bool changed = lastAttempt_.outcome != 0;
+        lastAttempt_.outcome = outcome;
+        taskMessage_ = std::string("Attempt #") + std::to_string(lastAttempt_.number) + (changed ? " changed to " : " marked ") +
+                       OutcomeName(outcome) + " (" + t.name + ", " + std::to_string(t.successfulAttempts) + "/" +
+                       std::to_string(t.completedAttempts) + " scored)";
+    } else {
+        t.completedAttempts++;
+        if (scored) t.successfulAttempts++;
+        lastAttempt_ = {activeTaskIndex_, t.completedAttempts, outcome, std::string(), now};
+        taskMessage_ = "Attempt #" + std::to_string(t.completedAttempts) + " logged as " + OutcomeName(outcome) + " without a clip (" +
+                       t.name + ")";
     }
-
-    t.completedAttempts++;
-    if (scored) t.successfulAttempts++;
-    lastActionWasSaveClip_ = false;
     SaveTasks();
-    printf("[server] logged attempt for [%d] %s: %d/%d (scored: %d)\n",
-               activeTaskIndex_, t.name.c_str(), t.completedAttempts, t.targetAttempts, t.successfulAttempts);
+    printf("[server] %s\n", taskMessage_.c_str());
     return true;
+}
+
+bool RewardEval::UndoTaskAttempt() {
+    const bool valid = lastAttempt_.number > 0 && lastAttempt_.task >= 0 && lastAttempt_.task < (int)tasks_.size();
+    if (!valid) {
+        taskMessage_ = "Nothing to undo";
+        return false;
+    }
+    auto& t = tasks_[lastAttempt_.task];
+    t.completedAttempts = std::max(0, t.completedAttempts - 1);
+    if (lastAttempt_.outcome == 1) t.successfulAttempts = std::max(0, t.successfulAttempts - 1);
+    t.successfulAttempts = std::min(t.successfulAttempts, t.completedAttempts);
+    std::string kept;
+    if (!lastAttempt_.clip.empty()) {
+        std::filesystem::path from(lastAttempt_.clip);
+        std::filesystem::path to = from;
+        to.replace_filename(from.stem().string() + "_undone" + from.extension().string());
+        std::error_code ec;
+        std::filesystem::rename(from, to, ec);
+        if (!ec) kept = " (clip kept as " + to.filename().string() + ")";
+    }
+    taskMessage_ = "Undid attempt #" + std::to_string(lastAttempt_.number) + " of " + t.name + kept;
+    lastAttempt_ = {};
+    SaveTasks();
+    printf("[server] %s\n", taskMessage_.c_str());
+    return true;
+}
+
+nlohmann::json RewardEval::LastAttemptJson() const {
+    const bool valid = lastAttempt_.number > 0;
+    return {{"task", valid ? lastAttempt_.task : -1},
+            {"number", valid ? lastAttempt_.number : 0},
+            {"outcome", valid ? OutcomeName(lastAttempt_.outcome) : "none"},
+            {"clip", lastAttempt_.clip}};
 }
 
 bool RewardEval::ResetTask(int index) {
     if (tasks_.empty()) return false;
-    lastActionWasSaveClip_ = false;
+    lastAttempt_ = {};
     if (index >= 0 && index < (int)tasks_.size()) {
         tasks_[index].completedAttempts = 0;
         tasks_[index].successfulAttempts = 0;
         SaveTasks();
+        taskMessage_ = "Reset counters of " + tasks_[index].name;
         printf("[server] reset attempt counters for [%d] %s\n", index, tasks_[index].name.c_str());
         return true;
     } else if (index == -1) {
@@ -694,6 +747,7 @@ bool RewardEval::ResetTask(int index) {
             t.successfulAttempts = 0;
         }
         SaveTasks();
+        taskMessage_ = "Reset all shot counters";
         printf("[server] reset all shot task counters\n");
         return true;
     }
@@ -722,13 +776,17 @@ bool RewardEval::SaveTaskClip(std::string& outPath, std::string& err, const std:
     if (shotId.empty()) shotId = "shot_" + std::to_string(activeTaskIndex_);
 
     std::string subfolder = !overrideSubfolder.empty() ? overrideSubfolder : (tlistId + "/" + shotId);
-    std::string clipName = "attempt_" + std::to_string(cur.completedAttempts + 1);
+    const std::filesystem::path folder = std::filesystem::path(clipFolder_.empty() ? "reward_clips" : clipFolder_) / subfolder;
+    int number = cur.completedAttempts + 1;
+    while (std::filesystem::exists(folder / ("attempt_" + std::to_string(number) + ".rlpr")) ||
+           std::filesystem::exists(folder / ("attempt_" + std::to_string(number) + "_undone.rlpr"))) ++number;
 
-    if (!SaveClip(clipName, outPath, err, subfolder)) {
+    if (!SaveClip("attempt_" + std::to_string(number), outPath, err, subfolder)) {
         return false;
     }
     cur.completedAttempts++;
-    lastActionWasSaveClip_ = true;
+    lastAttempt_ = {activeTaskIndex_, cur.completedAttempts, 0, outPath, std::chrono::steady_clock::now()};
+    taskMessage_ = "Saved attempt #" + std::to_string(cur.completedAttempts) + " of " + cur.name + ": press scored or miss to mark it";
     SaveTasks();
     printf("[server] saved task clip [%d] %s -> %s (%d/%d attempts)\n",
            activeTaskIndex_, cur.name.c_str(), outPath.c_str(), cur.completedAttempts, cur.targetAttempts);

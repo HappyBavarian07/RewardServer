@@ -238,157 +238,14 @@ std::string RewardClient::TasksPath() {
     return tasksPath_;
 }
 
-bool RewardClient::DoGetTasks() {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "get_tasks"}}.dump(), resp)) return false;
+bool RewardClient::ApplyTaskReply(const std::string &resp, bool notify) {
     try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) return true;
-        std::vector<ShotTask> tasks;
-        for (const auto &item: j.value("tasks", json::array())) {
-            ShotTask t;
-            t.id = item.value("id", "");
-            t.name = item.value("name", "");
-            t.instructions = item.value("instructions", "");
-            t.expectedMode = item.value("expectedMode", "");
-            t.tag = item.value("tag", "");
-            t.targetAttempts = item.value("targetAttempts", 3);
-            t.completedAttempts = item.value("completedAttempts", 0);
-            t.successfulAttempts = item.value("successfulAttempts", 0);
-            tasks.push_back(t);
-        }
+        const json j = json::parse(resp);
+        const std::string message = j.value("message", std::string());
         std::lock_guard<std::mutex> l(taskMut_);
-        tasks_ = std::move(tasks);
-        activeTaskIndex_ = j.value("active_index", 0);
-        tasksPath_ = j.value("tasks_path", tasksPath_);
-    } catch (...) { return false; }
-    return true;
-}
-
-bool RewardClient::DoSetActiveTask(int index) {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "set_active_task"}, {"index", index}}.dump(), resp)) return false;
-    try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) return true;
-        std::lock_guard<std::mutex> l(taskMut_);
-        activeTaskIndex_ = j.value("active_index", index);
-        if (j.contains("tasks")) {
-            std::vector<ShotTask> tasks;
-            for (const auto &item: j["tasks"]) {
-                ShotTask t;
-                t.id = item.value("id", "");
-                t.name = item.value("name", "");
-                t.instructions = item.value("instructions", "");
-                t.expectedMode = item.value("expectedMode", "");
-                t.tag = item.value("tag", "");
-                t.targetAttempts = item.value("targetAttempts", 3);
-                t.completedAttempts = item.value("completedAttempts", 0);
-                t.successfulAttempts = item.value("successfulAttempts", 0);
-                tasks.push_back(t);
-            }
-            tasks_ = std::move(tasks);
-        }
-    } catch (...) { return false; }
-    return true;
-}
-
-bool RewardClient::DoLogTaskAttempt(bool scored) {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "log_task_attempt"}, {"scored", scored}}.dump(), resp)) return false;
-    try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) return true;
-        std::lock_guard<std::mutex> l(taskMut_);
-        activeTaskIndex_ = j.value("active_index", activeTaskIndex_);
-        if (j.contains("tasks")) {
-            std::vector<ShotTask> tasks;
-            for (const auto &item: j["tasks"]) {
-                ShotTask t;
-                t.id = item.value("id", "");
-                t.name = item.value("name", "");
-                t.instructions = item.value("instructions", "");
-                t.expectedMode = item.value("expectedMode", "");
-                t.tag = item.value("tag", "");
-                t.targetAttempts = item.value("targetAttempts", 3);
-                t.completedAttempts = item.value("completedAttempts", 0);
-                t.successfulAttempts = item.value("successfulAttempts", 0);
-                tasks.push_back(t);
-            }
-            tasks_ = std::move(tasks);
-        }
-    } catch (...) { return false; }
-    return true;
-}
-
-bool RewardClient::DoResetTask(int index) {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "reset_task"}, {"index", index}}.dump(), resp)) return false;
-    try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) return true;
-        std::lock_guard<std::mutex> l(taskMut_);
-        activeTaskIndex_ = j.value("active_index", activeTaskIndex_);
-        if (j.contains("tasks")) {
-            std::vector<ShotTask> tasks;
-            for (const auto &item: j["tasks"]) {
-                ShotTask t;
-                t.id = item.value("id", "");
-                t.name = item.value("name", "");
-                t.instructions = item.value("instructions", "");
-                t.expectedMode = item.value("expectedMode", "");
-                t.tag = item.value("tag", "");
-                t.targetAttempts = item.value("targetAttempts", 3);
-                t.completedAttempts = item.value("completedAttempts", 0);
-                t.successfulAttempts = item.value("successfulAttempts", 0);
-                tasks.push_back(t);
-            }
-            tasks_ = std::move(tasks);
-        }
-    } catch (...) { return false; }
-    return true;
-}
-
-bool RewardClient::DoReloadTasks(const std::string &path) {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "reload_tasks"}, {"path", path}}.dump(), resp)) return false;
-    try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) return true;
-        std::lock_guard<std::mutex> l(taskMut_);
-        activeTaskIndex_ = j.value("active_index", activeTaskIndex_);
-        tasksPath_ = j.value("tasks_path", tasksPath_);
-        if (j.contains("tasks")) {
-            std::vector<ShotTask> tasks;
-            for (const auto &item: j["tasks"]) {
-                ShotTask t;
-                t.id = item.value("id", "");
-                t.name = item.value("name", "");
-                t.instructions = item.value("instructions", "");
-                t.expectedMode = item.value("expectedMode", "");
-                t.tag = item.value("tag", "");
-                t.targetAttempts = item.value("targetAttempts", 3);
-                t.completedAttempts = item.value("completedAttempts", 0);
-                t.successfulAttempts = item.value("successfulAttempts", 0);
-                tasks.push_back(t);
-            }
-            tasks_ = std::move(tasks);
-        }
-    } catch (...) { return false; }
-    return true;
-}
-
-bool RewardClient::DoSaveTaskClip() {
-    std::string resp;
-    if (!Rpc(json{{"cmd", "save_task_clip"}}.dump(), resp)) return false;
-    try {
-        json j = json::parse(resp);
-        std::lock_guard<std::mutex> l(clipMut_);
-        clip_.pending = false;
         if (j.value("ok", false)) {
-            clip_.lastSavedPath = j.value("path", std::string());
-            std::lock_guard<std::mutex> lt(taskMut_);
             activeTaskIndex_ = j.value("active_index", activeTaskIndex_);
+            tasksPath_ = j.value("tasks_path", tasksPath_);
             if (j.contains("tasks")) {
                 std::vector<ShotTask> tasks;
                 for (const auto &item: j["tasks"]) {
@@ -405,15 +262,81 @@ bool RewardClient::DoSaveTaskClip() {
                 }
                 tasks_ = std::move(tasks);
             }
-        } else {
-            SetError("save_task_clip: " + j.value("error", std::string("failed")));
+            if (j.contains("last_attempt")) {
+                lastAttempt_.number = j["last_attempt"].value("number", 0);
+                lastAttempt_.outcome = j["last_attempt"].value("outcome", std::string("none"));
+            }
         }
+        if (notify && !message.empty()) {
+            taskNotice_ = message;
+            ++taskNoticeSeq_;
+        }
+    } catch (...) { return false; }
+    return true;
+}
+
+TaskNotice RewardClient::LatestTaskNotice() {
+    std::lock_guard<std::mutex> l(taskMut_);
+    return {taskNotice_, taskNoticeSeq_};
+}
+
+LastAttemptInfo RewardClient::LastAttempt() {
+    std::lock_guard<std::mutex> l(taskMut_);
+    return lastAttempt_;
+}
+
+void RewardClient::RequestUndoTaskAttempt() {
+    std::lock_guard<std::mutex> l(cfgMut_);
+    needUndoTaskAttempt_ = true;
+}
+
+bool RewardClient::DoGetTasks() {
+    std::string resp;
+    return Rpc(json{{"cmd", "get_tasks"}}.dump(), resp) && ApplyTaskReply(resp, false);
+}
+
+bool RewardClient::DoSetActiveTask(int index) {
+    std::string resp;
+    return Rpc(json{{"cmd", "set_active_task"}, {"index", index}}.dump(), resp) && ApplyTaskReply(resp, true);
+}
+
+bool RewardClient::DoLogTaskAttempt(bool scored) {
+    std::string resp;
+    return Rpc(json{{"cmd", "log_task_attempt"}, {"scored", scored}}.dump(), resp) && ApplyTaskReply(resp, true);
+}
+
+bool RewardClient::DoUndoTaskAttempt() {
+    std::string resp;
+    return Rpc(json{{"cmd", "undo_task_attempt"}}.dump(), resp) && ApplyTaskReply(resp, true);
+}
+
+bool RewardClient::DoResetTask(int index) {
+    std::string resp;
+    return Rpc(json{{"cmd", "reset_task"}, {"index", index}}.dump(), resp) && ApplyTaskReply(resp, true);
+}
+
+bool RewardClient::DoReloadTasks(const std::string &path) {
+    std::string resp;
+    return Rpc(json{{"cmd", "reload_tasks"}, {"path", path}}.dump(), resp) && ApplyTaskReply(resp, true);
+}
+
+bool RewardClient::DoSaveTaskClip() {
+    std::string resp;
+    if (!Rpc(json{{"cmd", "save_task_clip"}}.dump(), resp)) return false;
+    try {
+        const json j = json::parse(resp);
+        {
+            std::lock_guard<std::mutex> l(clipMut_);
+            clip_.pending = false;
+            if (j.value("ok", false)) clip_.lastSavedPath = j.value("path", std::string());
+            else SetError("save_task_clip: " + j.value("error", std::string("failed")));
+        }
+        return ApplyTaskReply(resp, true);
     } catch (...) {
         std::lock_guard<std::mutex> l(clipMut_);
         clip_.pending = false;
         return false;
     }
-    return true;
 }
 
 bool RewardClient::DoSaveClip(const std::string &name) {
@@ -679,6 +602,7 @@ void RewardClient::WorkerLoop() {
         int setActiveIndex = 0;
         bool doLogTaskAttempt = false;
         bool logAttemptScored = false;
+        bool doUndoTaskAttempt = false;
         bool doResetTask = false;
         int resetTaskIndex = -1;
         bool doReloadTasks = false;
@@ -711,6 +635,9 @@ void RewardClient::WorkerLoop() {
                 doLogTaskAttempt = true;
                 logAttemptScored = pendingLogAttemptScored_;
                 needLogTaskAttempt_ = false;
+            } else if (needUndoTaskAttempt_) {
+                doUndoTaskAttempt = true;
+                needUndoTaskAttempt_ = false;
             } else if (needResetTask_) {
                 doResetTask = true;
                 resetTaskIndex = pendingResetTaskIndex_;
@@ -769,6 +696,10 @@ void RewardClient::WorkerLoop() {
         }
         if (doLogTaskAttempt) {
             if (!DoLogTaskAttempt(logAttemptScored)) Disconnect();
+            continue;
+        }
+        if (doUndoTaskAttempt) {
+            if (!DoUndoTaskAttempt()) Disconnect();
             continue;
         }
         if (doResetTask) {

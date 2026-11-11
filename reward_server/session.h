@@ -10,15 +10,12 @@ namespace rs {
 
 inline constexpr int kProtocolVersion = 1;
 
-/** Command dispatcher for one reward_server instance; owns the config path used by `reload`. */
 class Session {
 public:
     Session(RewardEval& eval, std::string initialConfig);
 
-    /** Answers one request object; unknown commands and malformed input yield `{"ok":false,...}`. */
     nlohmann::json Handle(const nlohmann::json& request);
 
-    /** Serves requests until the client disconnects. */
     void Serve(LineSocket& client);
 
 private:

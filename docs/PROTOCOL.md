@@ -76,7 +76,12 @@ contain `..`; the server refuses anything else.
 |---|---|---|
 | `get_tasks` | | `active_index`, `tasks`, `tasks_path` |
 | `set_active_task` | `index` | `active_index`, `tasks` |
-| `log_task_attempt` | `scored` | `active_index`, `tasks` |
+| `log_task_attempt` | `scored` | `active_index`, `tasks`, `message`, `last_attempt` |
+| `undo_task_attempt` | | `active_index`, `tasks`, `message`, `last_attempt`. Fails with `message: "Nothing to undo"` |
 | `reset_task` | `index` (-1 resets all) | `active_index`, `tasks` |
 | `reload_tasks` | `path` | `active_index`, `tasks`, `tasks_path` |
-| `save_task_clip` | `clip_folder`, `subfolder` | `path`, `active_index`, `tasks` |
+| `save_task_clip` | `clip_folder`, `subfolder` | `path`, `active_index`, `tasks`, `message`, `last_attempt` |
+
+Every task reply carries a `message`, one line the overlay shows as a toast. `last_attempt` has `task`, `number`, `outcome` (`none`, `unmarked`, `scored` or `miss`) and `clip`.
+
+`save_task_clip` counts a new attempt and leaves it `unmarked`. `log_task_attempt` then sets the outcome of that attempt. Sending the other outcome changes it, and sending the same one again does nothing, so a wrong key never counts twice. With no attempt to mark, or more than 90 seconds after it, `log_task_attempt` logs a new attempt without a clip. `undo_task_attempt` takes the latest attempt out of the counters and renames its clip to `<name>_undone.rlpr`. Switching task, reloading the list or resetting counters ends the marking window.

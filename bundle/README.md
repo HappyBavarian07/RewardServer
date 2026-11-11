@@ -50,8 +50,9 @@ If your fork's `GameState` lacks a field the server reads, the compiler names it
 |---|---|---|
 | NumPad 0 | `rewardtester_toggle_menu` | Shows or hides the inspector window |
 | X | `rewardtester_save_task_clip` | Saves the last 15 s tagged for the active task and counts an attempt |
-| NumPad * | `rewardtester_mark_scored` | Marks the active attempt as scored |
-| NumPad / | `rewardtester_mark_miss` | Marks the active attempt as missed |
+| NumPad * | `rewardtester_mark_scored` | Marks the latest attempt as scored. Changes it if it was a miss |
+| NumPad / | `rewardtester_mark_miss` | Marks the latest attempt as missed. Changes it if it was scored |
+| NumPad . | `rewardtester_undo_attempt` | Takes the latest attempt out of the counters |
 | NumPad + and - | `rewardtester_next_task`, `rewardtester_prev_task` | Changes the active task |
 | C | `rewardtester_save_clip` | Saves a generic clip |
 | console | `rewardtester_reload` | Reloads the config on the server, which calls your `CreateUserReward` again |

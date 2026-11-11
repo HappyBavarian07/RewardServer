@@ -5,10 +5,6 @@
 namespace {
 using namespace RLGC;
 
-/**
- * Example source with two hand-written terms. Replace the body of Evaluate with calls into your own
- * reward classes: one row per reward, e.g. out.values[i] = myReward.GetReward(player, state, false).
- */
 class ExampleSource : public rs::IRewardSource {
 public:
     explicit ExampleSource(std::function<uint64_t()> getTimestep) : getStep_(std::move(getTimestep)) {}

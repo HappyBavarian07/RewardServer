@@ -1,5 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <deque>
 #include <memory>
 #include <string>
@@ -11,10 +12,6 @@ namespace RocketSim { class Arena; class Car; struct GameEventTracker; }
 
 namespace rs {
 
-/**
- * Owns the live reward source and the rolling previous game state so deltas and schedule fading
- * behave exactly as in training. One instance per server.
- */
 class RewardEval {
 public:
     ~RewardEval();
@@ -28,30 +25,20 @@ public:
     int Count() const { return (int)names_.size(); }
     const std::vector<std::string>& Names() const { return names_; }
 
-    /** Clears all per-player reward state; call on every episode reset (goal, freeplay reset). */
     void Reset();
 
-    /** Parses one eval request into a GameState and fills the per-term output; false if it has no cars. */
     bool Evaluate(const nlohmann::json& req, RewardTerms& out);
 
-    /** Buffers one tick for the rolling clip window without evaluating any reward. */
     bool Capture(const nlohmann::json& req);
 
-    /**
-     * Evaluates an already-built GameState (kinematics, flags, controls) exactly like the JSON path: arena mirror,
-     * extension hooks, PreStep and Evaluate. `gs` is overlaid with the mirror-derived fields and retained as the
-     * next tick's previous state.
-     */
     bool EvaluateState(RLGC::GameState& gs, int tickSkip, int focus, bool debug, RewardTerms& out,
                        bool reconstruct = true);
 
-    /** Infers contacts for the observed preceding interval only; they are evidence, never native RL contacts. */
     void ReconstructState(RLGC::GameState& gs, const RLGC::GameState* previous, int tickSkip);
 
     void SetExtension(std::unique_ptr<IEvalExtension> extension) { extension_ = std::move(extension); }
     const IEvalExtension* Extension() const { return extension_.get(); }
 
-    /** Training step the schedule is evaluated at for EvaluateState; the JSON path takes it from the request. */
     void SetStep(uint64_t step) { currentStep_ = step; }
 
     void SetClipFolder(const std::string& folder) { clipFolder_ = folder; }
@@ -59,11 +46,8 @@ public:
     void SetClipWindowSeconds(float s) { clipWindowSeconds_ = std::max(1.0f, s); }
     float ClipWindowSeconds() const { return clipWindowSeconds_; }
 
-    /// Write the buffered window to <clipFolder>/<subfolder>/<name>.rlpr. Empty name auto-timestamps.
-    /// Returns the written path in outPath, or false plus a reason in err.
     bool SaveClip(const std::string& name, std::string& outPath, std::string& err, const std::string& subfolder = "generic");
 
-    /// .rlpr files currently present in the clip folder, newest first.
     std::vector<std::string> ListClips() const;
 
     int BufferedFrames() const {
@@ -89,7 +73,11 @@ public:
     bool SaveTasks(const std::string& path = "");
     nlohmann::json GetTasksJson() const;
     bool SetActiveTask(int index);
+    /** Marks or re-marks the latest attempt; logs a clip-less attempt when there is none to mark. */
     bool LogTaskAttempt(bool scored);
+    bool UndoTaskAttempt();
+    const std::string& TaskMessage() const { return taskMessage_; }
+    nlohmann::json LastAttemptJson() const;
     bool ResetTask(int index);
     bool SaveTaskClip(std::string& outPath, std::string& err, const std::string& overrideSubfolder = "");
     int ActiveTaskIndex() const { return activeTaskIndex_; }
@@ -97,11 +85,6 @@ public:
 private:
     bool BuildGameState(const nlohmann::json& req, RLGC::GameState& gs) const;
 
-    /**
-     * Mirrors the preceding observed kinematics into a persistent arena, steps it tickSkip ticks with the
-     * preceding controls, and overlays the simulator-derived fields BakkesMod cannot supply (contact, wheels,
-     * flip/jump state, ball-hit info, goal/shot/save/bump/demo events, goalScored) onto the GameState.
-     */
     void MirrorArena(RLGC::GameState& gs, const RLGC::GameState& previous, int tickSkip);
     int MirrorIndexOf(RocketSim::Car* car) const;
     void RecordGoal(RocketSim::Car* scorer, RocketSim::Car* passer);
@@ -142,7 +125,15 @@ private:
     std::string tasksPath_ = "data/shot_tasks.json";
     std::string tasklistId_;
     bool tasksWereObjectFormat_ = false;
-    bool lastActionWasSaveClip_ = false;
+    struct AttemptRecord {
+        int task = -1;
+        int number = 0;
+        int outcome = 0;
+        std::string clip;
+        std::chrono::steady_clock::time_point at;
+    };
+    AttemptRecord lastAttempt_;
+    std::string taskMessage_;
 };
 
 }

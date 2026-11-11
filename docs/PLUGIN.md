@@ -79,8 +79,9 @@ Bind the keys once with the buttons under "Active Keybinds" on the plugin's sett
 |---|---|---|
 | NumPad 0 | `rewardtester_toggle_menu` | Shows or hides the inspector window |
 | X | `rewardtester_save_task_clip` | Saves the rolling window tagged for the active task and counts an attempt |
-| NumPad * | `rewardtester_mark_scored` | Marks the active attempt as scored |
-| NumPad / | `rewardtester_mark_miss` | Marks the active attempt as missed |
+| NumPad * | `rewardtester_mark_scored` | Marks the latest attempt as scored. Changes it if it was a miss |
+| NumPad / | `rewardtester_mark_miss` | Marks the latest attempt as missed. Changes it if it was scored |
+| NumPad . | `rewardtester_undo_attempt` | Takes the latest attempt out of the counters and keeps its clip as `_undone` |
 | NumPad + and - | `rewardtester_next_task`, `rewardtester_prev_task` | Changes the active task |
 | C | `rewardtester_save_clip [name]` | Saves a generic clip |
 | console | `rewardtester_reload` | Reloads the reward config on the server |
@@ -88,7 +89,9 @@ Bind the keys once with the buttons under "Active Keybinds" on the plugin's sett
 | console | `rewardtester_autosave [seconds]` | Saves a clip every N seconds of physics. 13 is the maximum, 0 turns it off |
 | console | `rewardtester_probe_start [seed] [episodeSeconds] [saveEvery]`, `rewardtester_probe_stop` | Automated physics probe episodes. Developer tool |
 
-Press `rewardtester_mark_scored` after a task clip and it marks that saved attempt without counting it twice.
+The shot flow is two keys: X saves the shot as the next attempt, then NumPad * or NumPad / sets its outcome. An unmarked attempt counts as a miss. Pressing the wrong outcome key is harmless, press the other one and the same attempt changes. Marking without saving a clip first logs a clip-less attempt. Every key shows a one-line toast with what it did.
+
+NumPad . is bound to BakkesMod's `Decimal` key. If your layout names it differently, bind `rewardtester_undo_attempt` by hand.
 
 ***
 

@@ -251,15 +251,15 @@ void RewardEval::MirrorArena(RLGC::GameState& gs, const RLGC::GameState& previou
 bool RewardEval::Load(const std::string& configPath, std::string& err) {
     try {
         auto getStep = [this]() -> uint64_t { return currentStep_; };
-        reward_ = CreateUserReward(configPath, getStep);
-        if (!reward_) { err = "CreateUserReward returned null"; return false; }
+        auto next = CreateUserReward(configPath, getStep);
+        if (!next) { err = "CreateUserReward returned null"; return false; }
+        reward_ = std::move(next);
         if (!extension_) extension_ = CreateEvalExtension();
         if (extension_) extension_->OnLoad(*reward_);
         names_ = reward_->Names();
         havePrev_ = false;
         return true;
     } catch (const std::exception& e) {
-        reward_.reset();
         err = std::string("CreateUserReward failed: ") + e.what();
         return false;
     }

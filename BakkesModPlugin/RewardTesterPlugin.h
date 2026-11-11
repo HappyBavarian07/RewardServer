@@ -130,7 +130,7 @@ private:
     int fadingTimesteps = 120;
     char serverHostBuf[128] = "127.0.0.1";
     int serverPort = 42069;
-    char configFilePathBuf[512] = "reward.json";
+    char configFilePathBuf[512] = "";
 
     uint64_t physicsTickCount = 0;
     std::unordered_map<uintptr_t, ControllerInput> lastAppliedInput;

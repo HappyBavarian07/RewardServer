@@ -44,7 +44,7 @@ The title line is green and shows the term count when the server is connected.
 | Control | What it does |
 |---|---|
 | Server Host, Port, **Connect / Reconnect** | Where the server runs. Defaults `127.0.0.1` and `42069` |
-| Config (server-side) | The path passed to `CreateUserReward`. The server resolves it from its working directory |
+| Config (server-side) | The path passed to `CreateUserReward`, resolved from the server's working directory. Leave it empty to use the config the server was started with |
 | **Reload Config** | Reloads the reward without restarting the server |
 | Training Step slider, +1B / +10B / +50B | Previews schedule weights at that step |
 | **Force late-schedule step** | Evaluates fully faded-in weights. At step 0 most scheduled terms read zero |

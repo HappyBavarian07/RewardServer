@@ -1335,7 +1335,8 @@ void RewardTesterPlugin::Render() {
             if (ImGui::BeginTabItem("Live Rewards")) {
                 ImGui::InputText("Server Host", serverHostBuf, sizeof(serverHostBuf));
                 ImGui::InputInt("Port", &serverPort);
-                ImGui::InputText("Config (server-side)", configFilePathBuf, sizeof(configFilePathBuf));
+                ImGui::InputTextWithHint("Config (server-side)", "empty = the server's own config", configFilePathBuf,
+                                         sizeof(configFilePathBuf));
                 if (ImGui::Button("Connect / Reconnect")) Reconnect();
                 ImGui::SameLine();
                 if (ImGui::Button("Reload Config")) ReloadConfig();

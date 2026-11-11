@@ -485,7 +485,8 @@ bool RewardClient::Rpc(const std::string &reqLine, std::string &respLine) {
 
 bool RewardClient::DoLoad(const std::string &config) {
     std::string resp;
-    if (!Rpc(json{{"cmd", "load"}, {"config", config}}.dump(), resp)) {
+    const json request = config.empty() ? json{{"cmd", "reload"}} : json{{"cmd", "load"}, {"config", config}};
+    if (!Rpc(request.dump(), resp)) {
         Disconnect();
         return false;
     }

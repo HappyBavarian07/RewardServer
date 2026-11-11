@@ -277,8 +277,14 @@ void RewardTesterPlugin::DrawClipsTab() {
                     if (ImGui::Selectable(clip.c_str(), clip == selectedClipPath)) select(clip);
                 }
             } else {
-                std::vector<ClipGroupEntry> groups;
-                BuildClipGroups(groups);
+                size_t signature = cs.clips.size();
+                for (const auto &clip : cs.clips) signature = signature * 1000003u + std::hash<std::string>()(clip);
+                if (signature != clipGroupSignature) {
+                    clipGroupCache.clear();
+                    BuildClipGroups(clipGroupCache);
+                    clipGroupSignature = signature;
+                }
+                const std::vector<ClipGroupEntry> &groups = clipGroupCache;
                 auto draw = [&](auto &&self, const std::vector<ClipGroupEntry> &level, const std::string &prefix) -> void {
                     for (const auto &group : level) {
                         ImGui::PushID((prefix + group.group).c_str());

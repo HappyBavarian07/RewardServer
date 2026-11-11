@@ -2,23 +2,23 @@
 
 ### Introduction
 
-On this page I want to show you how to get your own reward into the server. At the end you have a `reward_server.exe` whose overlay rows are your terms.
+On this page I want to show you how to get your own reward into the server. At the end the overlay rows are your terms.
 
-You write one source file with two functions. The server calls them. Nothing else in RewardServer needs to change.
+You write one source file with two functions. The server calls them.
 
 ***
 
 ## What You Need
 
-*   A CMake project that builds the `GigaLearnCPP` target (any GigaLearnCPP-based project works).
+*   A CMake project that builds the `GigaLearnCPP` target.
 *   MSVC with C++20.
-*   The reward classes you want to test, or a config format you can load yourself.
+*   Your reward classes, or a config format you can load yourself.
 
 ***
 
-## Writing the Source File
+## The Source File
 
-**First Step**: Copy `examples/user_reward_example.cpp` next to your reward code and open it.
+**First Step**: Copy `examples/user_reward_example.cpp` next to your reward code.
 
 **Second Step**: Implement `IRewardSource` around your reward.
 
@@ -31,8 +31,6 @@ using namespace RLGC;
 
 class MySource : public rs::IRewardSource {
 public:
-    explicit MySource(std::function<uint64_t()> getTimestep) : getStep_(std::move(getTimestep)) {}
-
     const std::vector<std::string>& Names() const override { return names_; }
 
     void PreStep(const GameState& state) override {}
@@ -47,14 +45,13 @@ public:
     }
 
 private:
-    std::function<uint64_t()> getStep_;
     std::vector<std::string> names_ = {"Speed"};
 };
 }
 
 namespace rs {
 std::unique_ptr<IRewardSource> CreateUserReward(const std::string& configPath, std::function<uint64_t()> getTimestep) {
-    return std::make_unique<MySource>(std::move(getTimestep));
+    return std::make_unique<MySource>();
 }
 std::unique_ptr<IEvalExtension> CreateEvalExtension() { return nullptr; }
 }
@@ -63,35 +60,33 @@ std::unique_ptr<IEvalExtension> CreateEvalExtension() { return nullptr; }
 
 **What happens here**:
 
-*   `CreateUserReward` runs on every `load` and `reload`. `configPath` is whatever the overlay's config box holds. Load a file with it or ignore it.
-*   `getTimestep` returns the training step the overlay's slider is set to. Use it if your terms fade in over training.
-*   `PreStep` runs once per tick before `Evaluate`. Put state tracking there.
-*   `Evaluate` fills one row per term. `weights` and `weighted` may stay empty for terms without a weight.
-*   Terms that fire in your trainer should keep their trainer name, so the overlay matches your metrics.
+*   `CreateUserReward` runs on every `load` and `reload`. `configPath` is the overlay's config box. Load a file with it or ignore it.
+*   `getTimestep` returns the training step the overlay is set to. Use it if your terms fade in over training.
+*   `PreStep` runs once per tick before `Evaluate`. Track state there.
+*   `Evaluate` fills one row per term. Leave `weights` and `weighted` empty for terms without a weight.
+*   Use the names your trainer uses, so the rows match your metrics.
 
-**Third Step**: Wrap a real reward. If your reward is a class with `GetReward(player, state, isFinal)`, call it inside `Evaluate` and write one row per class. For a combined reward, push one row per sub-term.
+**Third Step**: Call your real reward classes inside `Evaluate`, one row per class.
 
 ***
 
-## Optional: Evaluation Hooks
+## Evaluation Hooks
 
-`CreateEvalExtension` can return an `IEvalExtension`. Its hooks run around every evaluation and see the same `GameState` the reward sees:
+`CreateEvalExtension` can return an `IEvalExtension`. Its hooks see the same `GameState` the reward sees. Return null if you don't need them.
 
-| Hook | Runs | Typical use |
+| Hook | Runs | Use |
 |---|---|---|
-| `OnLoad(source)` | After a reward was (re)loaded | Reset detectors, read term configuration |
-| `OnReset()` | On goals and freeplay resets | Clear per-episode state |
-| `BeforeEvaluate(gs)` | After state reconstruction, before `PreStep` | Fill caches, attach `gs.userInfo` |
-| `AfterEvaluate(gs)` | After `Evaluate` | Collect labels |
-| `TickReport(focus)` / `ReplayReport()` | During `--replay --json --extra` | Add your fields to the output |
-
-Return null if you don't need any of it.
+| `OnLoad(source)` | after a reward was loaded | reset detectors |
+| `OnReset()` | on goals and freeplay resets | clear per-episode state |
+| `BeforeEvaluate(gs)` | before `PreStep` | fill caches, attach `gs.userInfo` |
+| `AfterEvaluate(gs)` | after `Evaluate` | collect labels |
+| `TickReport(focus)`, `ReplayReport()` | during `--replay --json --extra` | add fields to the output |
 
 ***
 
 ## Building
 
-**First Step**: Tell CMake about your file before adding the server.
+**First Step**: Set the variables before adding the server.
 
 {% code title="CMakeLists.txt" lineNumbers="true" %}
 ```cmake
@@ -102,9 +97,7 @@ add_subdirectory(RewardServer/reward_server)
 ```
 {% endcode %}
 
-**Second Step**: Build the `reward_server` target in Release.
-
-Set these as normal variables before `add_subdirectory`. The full list is in [Server](SERVER.md#build-variables).
+**Second Step**: Build the `reward_server` target in Release. All variables are in [Server](SERVER.md#build-variables).
 
 ***
 
@@ -116,7 +109,7 @@ Start the server from the folder that contains `collision_meshes`:
 reward_server.exe --config reward.json
 ```
 
-The console should print these lines:
+The console should print:
 
 ```text
 [server] RocketSim arena mirror enabled (meshes: collision_meshes)
@@ -124,14 +117,14 @@ The console should print these lines:
 [server] listening on 127.0.0.1:42069
 ```
 
-Then run the protocol check from another terminal. It loads the config, evaluates a canned state and checks every reply shape:
+Then run the protocol check from another terminal:
 
 ```powershell
 python tests/smoke_client.py --config reward.json
 ```
 
-`SMOKE OK (N terms)` means the server and your reward agree on the row count. After that, open the overlay in the game. See [Plugin](PLUGIN.md).
+`SMOKE OK (N terms)` means the server and your reward agree on the row count.
 
-**Note**: Changing reward code means rebuilding and restarting the server. The plugin reconnects by itself. A config change only needs **Reload Config** in the overlay.
+**Note**: Changing reward code means rebuilding and restarting the server. The plugin reconnects by itself. A config change only needs **Reload config** in the overlay.
 
-And done. Next: [Server](SERVER.md) for clips, tasks and the offline replay.
+And done. Next: [Server](SERVER.md).

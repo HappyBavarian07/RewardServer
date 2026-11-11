@@ -950,6 +950,28 @@ void RewardTesterPlugin::SampleReplay() {
     watch.followedIndex = subjectIndex;
     if (!subject || subject.IsNull()) return;
 
+    {
+        const RBState rb = subject.GetRBState();
+        ++watchDiagCalls;
+        if (frame != watchDiagLastFrame) ++watchDiagFrameChanges;
+        else if (std::abs(rb.Location.X - watchDiagLastPos[0]) + std::abs(rb.Location.Y - watchDiagLastPos[1]) +
+                 std::abs(rb.Location.Z - watchDiagLastPos[2]) > 0.01f)
+            ++watchDiagMovedWithinFrame;
+        watchDiagLastFrame = frame;
+        watchDiagLastPos[0] = rb.Location.X;
+        watchDiagLastPos[1] = rb.Location.Y;
+        watchDiagLastPos[2] = rb.Location.Z;
+        const double now = NowSeconds();
+        if (now - watchDiagLast >= 1.0) {
+            char line[200];
+            std::snprintf(line, sizeof(line), "[watch-diag] calls/s=%d frame_changes/s=%d moved_within_frame/s=%d fps=%d frame=%d",
+                          watchDiagCalls, watchDiagFrameChanges, watchDiagMovedWithinFrame, fps, frame);
+            cvarManager->log(line);
+            watchDiagLast = now;
+            watchDiagCalls = watchDiagFrameChanges = watchDiagMovedWithinFrame = 0;
+        }
+    }
+
     if (frame == watch.lastSentFrame) return;
     const int ticksPerFrame = std::max(1, static_cast<int>(std::lround(120.0f / fps)));
     const int delta = frame - watch.lastSentFrame;
@@ -1020,6 +1042,8 @@ void RewardTesterPlugin::OpenReplayClip(const std::string& path) {
     replayNeedsReseed = true;
     replayCarAddresses.clear();
     replayCarStateIndices.clear();
+    replayBotRequests = 0;
+    replayBotCooldownUntil = 0.0;
     isPlayingClip = true;
     cvarManager->log("[RewardTester] Loaded replay clip: " + path +
                      " (" + std::to_string(replayFrames.size()) + " frames)");
@@ -1060,7 +1084,22 @@ void RewardTesterPlugin::UpdateReplayPlayback(ServerWrapper server, float dt) {
             }
         }
     }
+    const auto begin = std::chrono::steady_clock::now();
     ApplyReplayFrame(server, activeReplayPath, replayTime);
+    replayDiagMicros += std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();
+    ++replayDiagTicks;
+    const double now = NowSeconds();
+    if (now - replayDiagLast >= 1.0) {
+        char line[256];
+        std::snprintf(line, sizeof(line),
+                      "[replay-diag] ticks/s=%d avg_apply_us=%.1f clip_cars=%zu live_cars=%zu bots_requested=%d playing=%d rate=%.2f",
+                      replayDiagTicks, replayDiagTicks ? replayDiagMicros / replayDiagTicks : 0.0, replayCarCount,
+                      replayLiveCars, replayBotRequests, isPlayingClip ? 1 : 0, replayRate);
+        cvarManager->log(line);
+        replayDiagLast = now;
+        replayDiagTicks = 0;
+        replayDiagMicros = 0.0;
+    }
 }
 
 bool RewardTesterPlugin::LoadReplayFrames(const std::string &path) {
@@ -1200,10 +1239,16 @@ void RewardTesterPlugin::ApplyReplayState(ServerWrapper server, const RLGC::Game
         if (!alreadyAdded) ordered.push_back(car);
     }
 
+    replayLiveCars = ordered.size();
     if (ordered.size() < state.players.size() && server.CanSpawnBots()) {
-        for (size_t i = ordered.size(); i < state.players.size(); ++i)
-            server.SpawnBot(0, "RewardReplay");
-        return;
+        const double now = NowSeconds();
+        if (now >= replayBotCooldownUntil && replayBotRequests < 6) {
+            for (size_t i = ordered.size(); i < state.players.size(); ++i) {
+                server.SpawnBot(0, "RewardReplay");
+                ++replayBotRequests;
+            }
+            replayBotCooldownUntil = now + 3.0;
+        }
     }
 
     if (!ReplayStateDriven() && !replayNeedsReseed &&

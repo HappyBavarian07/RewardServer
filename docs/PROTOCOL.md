@@ -1,12 +1,10 @@
 ---
-description: Every TCP command the reward server understands, with request and reply fields
+description: Every TCP command the reward server understands
 ---
 
 # Protocol
 
-Newline-delimited JSON on `127.0.0.1:<port>`, default 42069. One request object per line, one reply object per line. Every reply has `"ok"`, and failures add `"error"`. A line longer than 16 MiB closes the connection. The server serves one client at a time.
-
-Anything that speaks this can drive the server. `tests/smoke_client.py` is a minimal client. The protocol version is `1`, and `hello` lists every command the running server supports.
+Newline-delimited JSON on `127.0.0.1:<port>`, default 42069. One request object per line, one reply per line. Every reply has `"ok"`, failures add `"error"`. A line over 16 MiB closes the connection. One client at a time. The protocol version is `1`, and `hello` lists the commands the running server supports. `tests/smoke_client.py` is a minimal client.
 
 ## Reward
 
@@ -15,10 +13,10 @@ Anything that speaks this can drive the server. `tests/smoke_client.py` is a min
 | `hello` | | `server`, `proto`, `commands` |
 | `ping` | | |
 | `load` | `config` | `count`, `names` |
-| `reload` | | `count`, `names` (reuses the last `config`) |
+| `reload` | | `count`, `names` (uses the last `config`) |
 | `eval` | see below | `total`, `names`, `values`, `weights`, `weighted` |
-| `capture` | same state fields as `eval`; `tick_skip` is how many physics ticks the tick spans (default 1) | `frames` (buffers a tick without evaluating) |
-| `reset` | `clear_buffer` (default false) | clears per-episode reward state; with `clear_buffer` also empties the clip buffers |
+| `capture` | state fields as `eval`; `tick_skip` = ticks the tick spans (default 1) | `frames` |
+| `reset` | `clear_buffer` (default false) | clears episode state, and with `clear_buffer` the clip buffers |
 
 ### `eval` request
 
@@ -32,56 +30,53 @@ Anything that speaks this can drive the server. `tests/smoke_client.py` is a min
 }
 ```
 
-- `force_all` (default true) evaluates at a late training step so every scheduled term is fully weighted;
-  set it false to evaluate at `step`.
-- `tick_skip` is the number of physics ticks the previous state is advanced for (default 8, minimum 1).
-- `focus` selects the car whose per-term breakdown is reported.
-- `boost_pad_states` and `boost_pad_timers` hold 34 entries.
-- Vectors are `[x, y, z]`; `rot_mat` is row-major with 9 entries.
+*   `force_all` (default true) evaluates at a late step so every scheduled term has full weight. Set it false to use `step`.
+*   `tick_skip` is how many physics ticks the previous state advances. Default 8, minimum 1.
+*   `focus` is the car whose terms are reported.
+*   `boost_pad_states` and `boost_pad_timers` have 34 entries. `rot_mat` is row-major with 9.
 
-Car fields (all optional, defaults are zero or identity):
+Car fields, all optional:
 
 | Field | Meaning |
 |---|---|
 | `pos`, `vel`, `ang_vel`, `rot_mat` | kinematics |
 | `team` | 0 blue, 1 orange |
 | `boost` | 0 to 100 |
-| `is_on_ground`, `has_jumped`, `has_double_jumped`, `has_flipped`, `is_flipping`, `is_jumping`, `is_supersonic` | flags (0 or 1) |
+| `is_on_ground`, `has_jumped`, `has_double_jumped`, `has_flipped`, `is_flipping`, `is_jumping`, `is_supersonic` | flags, 0 or 1 |
 | `jump_time`, `flip_time`, `air_time_since_jump`, `handbrake_val` | seconds or 0 to 1 |
 | `flip_rel_torque` | vector |
 | `world_contact_has`, `world_contact_normal` | surface contact |
-| `prev_action` | object: `throttle`, `steer`, `pitch`, `yaw`, `roll`, `jump`, `boost`, `handbrake` |
-| `is_demoed`, `demo_respawn_timer` | demolition state |
+| `prev_action` | `throttle`, `steer`, `pitch`, `yaw`, `roll`, `jump`, `boost`, `handbrake` |
+| `is_demoed`, `demo_respawn_timer` | demolition |
 | `is_ball_touched` | the car touched the ball this tick |
 
 ## Clips
 
 | cmd | request fields | reply fields |
 |---|---|---|
-| `save_clip` | `name`, `subfolder` (default `generic`), `only_focus` (keep the ball and car 0 only), `source` (`live` or `replay`) | `path`, `frames` |
+| `save_clip` | `name`, `subfolder` (default `generic`), `only_focus` (ball and car 0 only), `source` (`live` or `replay`) | `path`, `frames` |
 | `list_clips` | | `folder`, `clips` |
 | `clip_info` | | `folder`, `window_seconds`, `buffered_frames` |
-| `set_clip_window` | `seconds` (minimum 1) | `window_seconds` |
+| `set_clip_window` | `seconds` (min 1) | `window_seconds` |
 | `set_clip_folder` | `folder` | `folder` |
-| `create_clip_folder` | `path` (relative) | |
-| `rename_clip_path` | `from`, `to` (relative) | |
-| `move_clip` | `source`, `folder` (relative) | |
+| `create_clip_folder` | `path` | |
+| `rename_clip_path` | `from`, `to` | |
+| `move_clip` | `source`, `folder` | |
 
-Paths in `create_clip_folder`, `rename_clip_path` and `move_clip` must be relative to the clip folder and may not
-contain `..`; the server refuses anything else.
+Paths in the last three are relative to the clip folder. Absolute paths and `..` are refused.
 
 ## Shot tasks
 
 | cmd | request fields | reply fields |
 |---|---|---|
 | `get_tasks` | | `active_index`, `tasks`, `tasks_path` |
-| `set_active_task` | `index` | `active_index`, `tasks` |
+| `set_active_task` | `index` | `active_index`, `tasks`, `message` |
 | `log_task_attempt` | `scored` | `active_index`, `tasks`, `message`, `last_attempt` |
-| `undo_task_attempt` | | `active_index`, `tasks`, `message`, `last_attempt`. Fails with `message: "Nothing to undo"` |
-| `reset_task` | `index` (-1 resets all) | `active_index`, `tasks` |
-| `reload_tasks` | `path` | `active_index`, `tasks`, `tasks_path` |
+| `undo_task_attempt` | | same. Fails with `message: "Nothing to undo"` |
+| `reset_task` | `index` (-1 for all) | `active_index`, `tasks`, `message` |
+| `reload_tasks` | `path` | `active_index`, `tasks`, `tasks_path`, `message` |
 | `save_task_clip` | `clip_folder`, `subfolder`, `only_focus`, `source` | `path`, `active_index`, `tasks`, `message`, `last_attempt` |
 
-Every task reply carries a `message`, one line the overlay shows as a toast. `last_attempt` has `task`, `number`, `outcome` (`none`, `unmarked`, `scored` or `miss`) and `clip`.
+`message` is one line the overlay shows as a toast. `last_attempt` has `task`, `number`, `outcome` (`none`, `unmarked`, `scored`, `miss`) and `clip`.
 
-`save_task_clip` counts a new attempt and leaves it `unmarked`. `log_task_attempt` then sets the outcome of that attempt. Sending the other outcome changes it, and sending the same one again does nothing, so a wrong key never counts twice. With no attempt to mark, or more than 90 seconds after it, `log_task_attempt` logs a new attempt without a clip. `undo_task_attempt` takes the latest attempt out of the counters and renames its clip to `<name>_undone.rlpr`. Switching task, reloading the list or resetting counters ends the marking window.
+`save_task_clip` counts a new attempt, unmarked. `log_task_attempt` sets its outcome. The other outcome changes it, the same one does nothing, so a wrong key never counts twice. With no attempt to mark, or 90 s after it, `log_task_attempt` logs an attempt without a clip. `undo_task_attempt` removes the latest attempt from the counters and renames its clip to `<name>_undone.rlpr`. Switching task, reloading or resetting ends the marking window.

@@ -1317,6 +1317,11 @@ void RewardTesterPlugin::ApplyReplayState(ServerWrapper server, const RLGC::Game
         BallWrapper ball = server.GetBall();
         if (ball && !ball.IsNull()) {
             RBState rb = ReplayRBState(state.ball);
+            if (std::abs(rb.Location.Y) > 5100.0f) {
+                rb.Location = Vector(0.0f, 0.0f, -5000.0f);
+                rb.LinearVelocity = Vector(0.0f, 0.0f, 0.0f);
+                rb.AngularVelocity = Vector(0.0f, 0.0f, 0.0f);
+            }
             ball.SetRBState(rb);
             ball.SetPhysicsState(rb);
         }

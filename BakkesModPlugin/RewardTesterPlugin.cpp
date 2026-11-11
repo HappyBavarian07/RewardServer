@@ -907,6 +907,7 @@ void RewardTesterPlugin::SampleReplay() {
     if (!watch.inReplay) {
         watch.frame = -1;
         watch.lastSentFrame = -1;
+        watch.lastElapsed = -1.0;
         return;
     }
     if (!client_ || replayActive) return;
@@ -953,6 +954,9 @@ void RewardTesterPlugin::SampleReplay() {
     {
         const RBState rb = subject.GetRBState();
         ++watchDiagCalls;
+        const double elapsedNow = replay.GetReplayTimeElapsed();
+        if (elapsedNow != watchDiagLastElapsed) ++watchDiagElapsedChanges;
+        watchDiagLastElapsed = elapsedNow;
         if (frame != watchDiagLastFrame) ++watchDiagFrameChanges;
         else if (std::abs(rb.Location.X - watchDiagLastPos[0]) + std::abs(rb.Location.Y - watchDiagLastPos[1]) +
                  std::abs(rb.Location.Z - watchDiagLastPos[2]) > 0.01f)
@@ -964,23 +968,28 @@ void RewardTesterPlugin::SampleReplay() {
         const double now = NowSeconds();
         if (now - watchDiagLast >= 1.0) {
             char line[200];
-            std::snprintf(line, sizeof(line), "[watch-diag] calls/s=%d frame_changes/s=%d moved_within_frame/s=%d fps=%d frame=%d",
-                          watchDiagCalls, watchDiagFrameChanges, watchDiagMovedWithinFrame, fps, frame);
+            std::snprintf(line, sizeof(line),
+                          "[watch-diag] calls/s=%d frame_changes/s=%d elapsed_changes/s=%d moved_within_frame/s=%d fps=%d frame=%d elapsed=%.3f",
+                          watchDiagCalls, watchDiagFrameChanges, watchDiagElapsedChanges, watchDiagMovedWithinFrame, fps, frame,
+                          elapsedNow);
             cvarManager->log(line);
             watchDiagLast = now;
-            watchDiagCalls = watchDiagFrameChanges = watchDiagMovedWithinFrame = 0;
+            watchDiagCalls = watchDiagFrameChanges = watchDiagElapsedChanges = watchDiagMovedWithinFrame = 0;
         }
     }
 
-    if (frame == watch.lastSentFrame) return;
-    const int ticksPerFrame = std::max(1, static_cast<int>(std::lround(120.0f / fps)));
-    const int delta = frame - watch.lastSentFrame;
-    int advance = ticksPerFrame;
-    if (watch.lastSentFrame < 0 || delta < 1 || delta > 4) {
+    const double elapsed = replay.GetReplayTimeElapsed();
+    int advance = 2;
+    if (watch.lastElapsed < 0.0 || elapsed < watch.lastElapsed || elapsed - watch.lastElapsed > 0.1) {
         client_->RequestReset(true);
+        watch.remainder = 0.0;
     } else {
-        advance = delta * ticksPerFrame;
+        const double owed = (elapsed - watch.lastElapsed) * 120.0 + watch.remainder;
+        advance = static_cast<int>(owed);
+        if (advance < 1) return;
+        watch.remainder = owed - advance;
     }
+    watch.lastElapsed = elapsed;
     watch.lastSentFrame = frame;
     ++watch.samples;
     SubmitSnapshot(replay, subject, advance, true);

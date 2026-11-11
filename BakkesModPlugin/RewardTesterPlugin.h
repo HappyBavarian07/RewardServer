@@ -115,6 +115,8 @@ private:
         int frame = -1;
         int fps = 0;
         int lastSentFrame = -1;
+        double lastElapsed = -1.0;
+        double remainder = 0.0;
         int cars = 0;
         int followedIndex = -1;
         std::string followedName;
@@ -144,6 +146,8 @@ private:
     int watchDiagCalls = 0;
     int watchDiagMovedWithinFrame = 0;
     int watchDiagFrameChanges = 0;
+    int watchDiagElapsedChanges = 0;
+    double watchDiagLastElapsed = -1.0;
     int watchDiagLastFrame = -1;
     float watchDiagLastPos[3] = {0, 0, 0};
     std::vector<ClipGroupEntry> clipGroupCache;

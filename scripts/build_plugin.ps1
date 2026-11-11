@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$FrameworkRoot,
     [string]$Config = 'Release',
     [string[]]$DataFiles = @(),
-    [switch]$NoDeploy
+    [switch]$NoDeploy,
+    [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
 $kit = Split-Path $PSScriptRoot -Parent
@@ -20,8 +21,8 @@ if (-not (Test-Path $dll)) { throw "missing $dll" }
 Write-Host "built $dll"
 if ($NoDeploy) { return }
 
-if (Get-Process RocketLeague -ErrorAction SilentlyContinue) {
-    throw 'Rocket League is running and keeps the plugin DLL locked; close it or pass -NoDeploy.'
+if ((Get-Process RocketLeague -ErrorAction SilentlyContinue) -and -not $Force) {
+    throw 'Rocket League is running with the plugin loaded. Close it, pass -NoDeploy, or pass -Force and run "plugin unload rewardtesterplugin" then "plugin load rewardtesterplugin" in the F6 console.'
 }
 $plugins = Join-Path $bakkes 'plugins'
 $installed = Join-Path $plugins 'RewardTesterPlugin.dll'

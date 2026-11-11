@@ -1,0 +1,22 @@
+[
+  {
+    "id": "example_1",
+    "name": "Example 1: Ground hit",
+    "tag": "Example1_GroundHit",
+    "instructions": "Describe the shot to perform here. The text shows in the plugin's Shot Tasks tab.",
+    "expectedMode": "Ground",
+    "targetAttempts": 3,
+    "completedAttempts": 0,
+    "successfulAttempts": 0
+  },
+  {
+    "id": "example_2",
+    "name": "Example 2: Aerial",
+    "tag": "Example2_Aerial",
+    "instructions": "Second example task.",
+    "expectedMode": "Air",
+    "targetAttempts": 3,
+    "completedAttempts": 0,
+    "successfulAttempts": 0
+  }
+]

@@ -1,0 +1,16 @@
+build/
+build-*/
+cmake-build-*/
+.vs/
+.idea/
+*.user
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.zip
+__pycache__/
+*.pyc

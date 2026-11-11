@@ -61,12 +61,13 @@ void RewardTesterPlugin::HandleReplayKeys() {
     if (!replayActive || ImGui::GetIO().WantTextInput) return;
     if ((GetAsyncKeyState('P') & 1) != 0)
         isPlayingClip = !isPlayingClip;
-    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow), false)) {
-        replayTime = std::max(0.0f, replayTime - replayFrameIntervalSeconds);
+    const float step = replayFrameIntervalSeconds * (ImGui::GetIO().KeyShift ? 10.0f : 1.0f);
+    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow), true)) {
+        replayTime = std::max(0.0f, replayTime - step);
         replayNeedsReseed = true;
     }
-    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow), false)) {
-        replayTime += replayFrameIntervalSeconds;
+    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow), true)) {
+        replayTime += step;
         replayNeedsReseed = true;
     }
     if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Z), false)) {

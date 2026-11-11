@@ -67,7 +67,7 @@ The task list comes from the server (`--tasks`). Each task has attempt counters 
 *   **Clip length**: 1 to 300 seconds.
 *   **Input sensitivity and deadzone**: used when a clip is replayed input-driven.
 *   **Folders**: create, rename and move clips inside the clip folder.
-*   **Replay**: selecting a clip plays it in the game. **P** plays or pauses, **Left** and **Right** step frames, **Z** restarts, **Esc** stops. The panel has speed, loop, state-driven and input-driven (re-simulated) modes.
+*   **Replay**: selecting a clip plays it in the game. **P** plays or pauses, **Left** and **Right** step frames (hold to keep stepping, hold Shift for ten frames at a time), **Z** restarts, **Esc** stops. The panel has speed, loop, state-driven and input-driven (re-simulated) modes.
 
 ***
 

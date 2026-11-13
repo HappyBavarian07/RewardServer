@@ -22,7 +22,6 @@ You write one source file with two functions. The server calls them.
 
 **Second Step**: Implement `IRewardSource` around your reward.
 
-{% code title="my_reward.cpp" lineNumbers="true" %}
 ```cpp
 #include "user_reward.h"
 
@@ -56,7 +55,6 @@ std::unique_ptr<IRewardSource> CreateUserReward(const std::string& configPath, s
 std::unique_ptr<IEvalExtension> CreateEvalExtension() { return nullptr; }
 }
 ```
-{% endcode %}
 
 **What happens here**:
 
@@ -88,14 +86,12 @@ std::unique_ptr<IEvalExtension> CreateEvalExtension() { return nullptr; }
 
 **First Step**: Set the variables before adding the server.
 
-{% code title="CMakeLists.txt" lineNumbers="true" %}
 ```cmake
 set(RS_FRAMEWORK_ROOT "${CMAKE_SOURCE_DIR}/GigaLearnCPP")
 set(RS_INTEGRATION_SOURCES "${CMAKE_SOURCE_DIR}/my_reward.cpp")
 set(RS_EXTRA_SOURCES ${MY_REWARD_SOURCES})
 add_subdirectory(RewardServer/reward_server)
 ```
-{% endcode %}
 
 **Second Step**: Build the `reward_server` target in Release. All variables are in [Server](SERVER.md#build-variables).
 

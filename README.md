@@ -1,6 +1,6 @@
 # RewardServer
 
-A BakkesMod plugin and a local server for testing reward functions in Rocket League. You play in freeplay or watch a replay, the plugin sends the cars and the ball to the server, and the server runs your reward on them. The overlay lists every reward term with its raw value, weight and weighted value.
+A BakkesMod plugin and local server for testing Rocket League reward functions. You play in freeplay or watch a replay; the plugin sends the cars and the ball to the server, and the server runs your reward on them. The overlay lists every reward term with its raw value, weight, and weighted value.
 
 It also:
 
@@ -9,13 +9,13 @@ It also:
 *   plays clips back in the game
 *   runs clips through your reward offline
 
-There is no training code in here. You need a GigaLearnCPP checkout (game state and RocketSim), the BakkesMod SDK and MSVC.
+There is no training code in here. You need a GigaLearnCPP/learning framework (or something similar) that can provide a game state, plus RocketSim, the BakkesMod SDK, and MSVC.
 
 ***
 
 ## Getting Started
 
-1.  Add the server to a CMake project that already has the `GigaLearnCPP` target:
+1.  Add the server to a CMake project that already has the `GigaLearnCPP` target or a learning framework that can supply RLGymCPP and RocketSim or GameStates:
 
     ```cmake
     set(RS_FRAMEWORK_ROOT "${CMAKE_SOURCE_DIR}/GigaLearnCPP")
@@ -29,13 +29,13 @@ There is no training code in here. You need a GigaLearnCPP checkout (game state 
     scripts\build_plugin.ps1 -FrameworkRoot <path to GigaLearnCPP>
     ```
 
-4.  Start the server from the folder that contains `collision_meshes`. Start the game, press F2, open Plugins, Reward Tester.
+4.  Start the server from the folder that contains `collision_meshes`. Start the game, press F2, open Plugins, and select Reward Tester.
 
     ```powershell
     reward_server.exe --config reward.json --tasks examples/example_tasks.json
     ```
 
-The overlay header says `CONNECTED` when it found the server. If it doesn't, see the [FAQ](docs/FAQ.md).
+The overlay header says `CONNECTED` when it finds the server. If it doesn't, see the [FAQ](docs/FAQ.md).
 
 ***
 
@@ -48,4 +48,4 @@ The overlay header says `CONNECTED` when it found the server. If it doesn't, see
 *   [Architecture](docs/ARCHITECTURE.md) - what runs where
 *   [FAQ](docs/FAQ.md)
 *   [Roadmap](docs/ROADMAP.md)
-*   [Bundle](bundle/README.md) - hand-out for people who only want the prebuilt plugin
+*   [Bundle](bundle/README.md) - handout for people who only want the prebuilt plugin

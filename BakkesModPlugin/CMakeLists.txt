@@ -26,7 +26,7 @@ include_directories(
 
 link_directories("${BAKKESMOD_SDK_DIR}/lib")
 
-add_library(RewardTesterPlugin SHARED
+set(REWARD_PLUGIN_SOURCES
     RewardTesterPlugin.cpp
     RewardTesterOverlay.cpp
     RewardTesterPlugin.h
@@ -42,6 +42,14 @@ add_library(RewardTesterPlugin SHARED
     imgui/imgui_searchablecombo.cpp
     imgui/imgui_timeline.cpp
 )
+add_library(RewardTesterPlugin SHARED ${REWARD_PLUGIN_SOURCES})
+
+option(RS_BUILD_PREVIEW "Build the standalone overlay preview" OFF)
+if(RS_BUILD_PREVIEW)
+    add_executable(RewardTesterPreview WIN32 Preview.cpp ${REWARD_PLUGIN_SOURCES})
+    target_compile_definitions(RewardTesterPreview PRIVATE RS_PREVIEW WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(RewardTesterPreview PRIVATE pluginsdk ws2_32 opengl32 gdi32)
+endif()
 
 set_source_files_properties(
     ${RS_KIT_ROOT}/rlpr/RLPRExporter.cpp

@@ -4,6 +4,19 @@ description: Build, install and use the BakkesMod overlay
 
 # Plugin
 
+## Preview without Rocket League
+
+From the RewardServer directory, configure and build the Windows preview:
+
+```powershell
+cmake -S BakkesModPlugin -B BakkesModPlugin/build -DRS_BUILD_PREVIEW=ON -DRS_FRAMEWORK_ROOT=D:/path/to/GigaLearnCPP
+cmake --build BakkesModPlugin/build --config Release --target RewardTesterPreview
+$env:Path = "$env:APPDATA\bakkesmod\bakkesmod\dll;$env:Path"
+.\BakkesModPlugin\build\Release\RewardTesterPreview.exe
+```
+
+The preview uses the plugin's tabs with sample data. It needs the local BakkesMod SDK and runtime files. Clip selection shows the playback controls. Server requests and game actions are inactive.
+
 `RewardTesterPlugin.dll` reads the cars and the ball and sends them to `reward_server` from a worker thread. The game thread never waits on the network. A stuck server shows up as `DISCONNECTED`, not as a frozen game.
 
 ***

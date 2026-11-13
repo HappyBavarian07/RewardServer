@@ -41,6 +41,7 @@ bool ColoredButton(const char *label, ImVec4 color, ImVec2 size) {
 }
 
 void RewardTesterPlugin::ApplyKeybinds() {
+    if (!gameWrapper) return;
     gameWrapper->Execute([this](GameWrapper *) {
         static const char *binds[] = {
             "bind NumPadZero \"rewardtester_toggle_menu\"",
@@ -171,7 +172,13 @@ void RewardTesterPlugin::DrawShotsTab() {
             ImGui::PushStyleColor(ImGuiCol_Text, done ? kGreen : t.completedAttempts > 0 ? kAmber : kDim);
             const std::string label = t.name + "  " + std::to_string(t.completedAttempts) + "/" +
                                       std::to_string(t.targetAttempts);
-            if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == active)) client_->RequestSetActiveTask(static_cast<int>(i));
+            if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == active)) {
+#ifdef RS_PREVIEW
+                client_->activeTaskIndex_ = static_cast<int>(i);
+#else
+                client_->RequestSetActiveTask(static_cast<int>(i));
+#endif
+            }
             ImGui::PopStyleColor();
         }
     }
@@ -448,7 +455,7 @@ void RewardTesterPlugin::DrawSettingsTab() {
     if (ImGui::CollapsingHeader("Game speed")) {
         ImGui::SliderFloat("Speed", &gameSpeed, 0.1f, 2.0f, "%.2fx");
         ImGui::SameLine();
-        if (ImGui::Button("Apply")) {
+        if (ImGui::Button("Apply") && gameWrapper) {
             gameWrapper->Execute([this](GameWrapper *) {
                 cvarManager->executeCommand("sv_soccar_gamespeed " + std::to_string(gameSpeed));
             });

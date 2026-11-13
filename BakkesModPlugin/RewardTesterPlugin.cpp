@@ -234,6 +234,7 @@ void RewardTesterPlugin::onUnload() {
 }
 
 void RewardTesterPlugin::Reconnect() {
+    if (!gameWrapper) return;
     if (!client_) client_ = std::make_unique<RewardClient>();
     client_->Start(serverHostBuf, serverPort, configFilePathBuf);
     cvarManager->log(std::string("Connecting to reward_server at ") + serverHostBuf + ":" + std::to_string(serverPort));
@@ -271,6 +272,7 @@ float RewardTesterPlugin::ShapeStick(float raw, float sensitivity) const {
 }
 
 void RewardTesterPlugin::SavePreferences() {
+    if (!gameWrapper) return;
     const char *appdata = std::getenv("APPDATA");
     if (!appdata) return;
     const std::filesystem::path path =
@@ -1042,6 +1044,18 @@ void RewardTesterPlugin::BuildClipGroups(std::vector<ClipGroupEntry>& groups) {
 }
 
 void RewardTesterPlugin::OpenReplayClip(const std::string& path) {
+#ifdef RS_PREVIEW
+    if (!gameWrapper) {
+        activeReplayPath = path;
+        replayFrames.resize(451);
+        replayFrameIntervalSeconds = 1.0f / 30;
+        replayCarCount = 2;
+        replayTime = 0;
+        replayActive = true;
+        isPlayingClip = false;
+        return;
+    }
+#endif
     if (!LoadReplayFrames(path)) return;
     activeReplayPath = path;
     replayActive = true;
@@ -1545,7 +1559,7 @@ void RewardTesterPlugin::Render() {
     ImGui::End();
     DrawReplayOverlay();
 
-    if (!isWindowOpen) {
+    if (!isWindowOpen && gameWrapper) {
         gameWrapper->Execute([this](GameWrapper *gw) {
             cvarManager->executeCommand("togglemenu " + GetMenuName());
         });

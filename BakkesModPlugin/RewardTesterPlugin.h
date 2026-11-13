@@ -25,6 +25,9 @@ struct ClipGroupEntry {
 class RewardTesterPlugin : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginSettingsWindow,
                            public BakkesMod::Plugin::PluginWindow {
 public:
+#ifdef RS_PREVIEW
+    void LoadPreview();
+#endif
     virtual void onLoad() override;
 
     virtual void onUnload() override;

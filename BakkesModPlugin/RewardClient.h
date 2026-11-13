@@ -90,6 +90,9 @@ struct LastAttemptInfo {
 };
 
 class RewardClient {
+#ifdef RS_PREVIEW
+    friend class RewardTesterPlugin;
+#endif
 public:
     RewardClient() = default;
 
